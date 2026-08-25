@@ -1,0 +1,2271 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Trying to Complete the Rainbow</title>
+
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #020202;
+      --fg: #f1f1f1;
+      --muted: #8a8a8a;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    #app {
+      position: relative;
+      width: 100vw;
+      height: 100dvh;
+      min-height: 100vh;
+      overflow: hidden;
+      background: var(--bg);
+    }
+
+    #stage {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 22px 22px 54px;
+    }
+
+    #circleCanvas {
+      display: block;
+      width: min(calc(100vw - 44px), calc(100dvh - 76px));
+      height: min(calc(100vw - 44px), calc(100dvh - 76px));
+      max-width: 100%;
+      max-height: 100%;
+    }
+
+    #minimalUi {
+      position: absolute;
+      left: 18px;
+      bottom: 16px;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      max-width: calc(100vw - 36px);
+      font-size: 11px;
+      line-height: 1.3;
+    }
+
+    #status {
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    #saveImageBtn,
+    #newRainbowBtn {
+      display: none;
+      appearance: none;
+      border: 0;
+      border-bottom: 1px solid currentColor;
+      padding: 0 0 2px;
+      background: transparent;
+      color: var(--fg);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    #saveImageBtn.is-visible,
+    #newRainbowBtn.is-visible {
+      display: inline-block;
+    }
+
+    #workCanvas {
+      display: none;
+    }
+
+    @media (max-width: 650px) {
+      #stage {
+        padding: 10px 10px 48px;
+      }
+
+      #circleCanvas {
+        width: min(calc(100vw - 20px), calc(100dvh - 62px));
+        height: min(calc(100vw - 20px), calc(100dvh - 62px));
+      }
+
+      #minimalUi {
+        left: 12px;
+        bottom: 12px;
+        max-width: calc(100vw - 24px);
+      }
+    }
+  </style>
+</head>
+
+<body>
+<main id="app">
+
+  <section id="stage">
+    <canvas id="circleCanvas"></canvas>
+  </section>
+
+  <div id="minimalUi">
+    <span id="status">loading rainbow detector…</span>
+    <button id="saveImageBtn" type="button">save image</button>
+    <button id="newRainbowBtn" type="button">new rainbow</button>
+  </div>
+
+</main>
+
+<canvas id="workCanvas"></canvas>
+
+<script type="module">
+import {
+  pipeline,
+  env
+} from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/+esm";
+
+(() => {
+  "use strict";
+
+  /*
+  ============================================================
+  TRYING TO COMPLETE THE RAINBOW — LARGE FIELD + SAFE EDGES
+  ZERO-SHOT RAINBOW DETECTION / SESSION CONTINUATION
+  ============================================================
+
+  The model is ONLY used to answer:
+
+      "Where is the rainbow in this photograph?"
+
+  Everything else remains generative / rule based.
+
+  Wikimedia image
+      ↓
+  OWL-ViT zero-shot object detection
+      ↓
+  bounding box for "rainbow"
+      ↓
+  crop real photographed rainbow
+      ↓
+  rotate / flip / scale / overlap
+      ↓
+  try to complete one circle
+
+  Nothing is artificially bent into an arc.
+  ============================================================
+  */
+
+  /*
+  Browser caching is allowed so the model does not need to be
+  downloaded from scratch every time.
+  */
+  env.allowLocalModels = false;
+
+  const API =
+    "https://commons.wikimedia.org/w/api.php";
+
+  /*
+  Prefer categories where the rainbow itself is likely to be
+  clearly visible.
+
+  We deliberately exclude Category:Circular rainbows.
+  */
+  const CATEGORIES = [
+    "Category:Quality images of rainbows",
+    "Category:Semi-circular rainbows",
+    "Category:Double rainbows",
+    "Category:Rainbows"
+  ];
+
+  const THUMB_WIDTH = 900;
+
+  /*
+  Zero-shot detection model.
+
+  OWL-ViT is open-vocabulary:
+  it can search for a text concept such as "rainbow".
+  */
+  const MODEL =
+    "Xenova/owlvit-base-patch32";
+
+  /*
+  We use several text descriptions.
+
+  The score can be quite low even when the object is correct,
+  so this threshold is intentionally permissive.
+  */
+  const LABELS = [
+    "rainbow",
+    "a rainbow in the sky",
+    "double rainbow",
+    "rainbow arc"
+  ];
+
+  const MODEL_THRESHOLD = 0.045;
+
+  /*
+  A second score threshold after filtering results.
+  */
+  const ACCEPT_SCORE = 0.055;
+
+  const SEARCH_DELAY_MS = 900;
+
+  /*
+  How much original photograph remains around model box.
+  */
+  const BOX_PADDING_X = 0.18;
+  const BOX_PADDING_Y = 0.28;
+
+  const canvas =
+    document.getElementById("circleCanvas");
+
+  const ctx =
+    canvas.getContext("2d");
+
+  const workCanvas =
+    document.getElementById("workCanvas");
+
+  const workCtx =
+    workCanvas.getContext(
+      "2d",
+      { willReadFrequently: true }
+    );
+
+  const statusEl =
+    document.getElementById("status");
+
+  const saveImageBtn =
+    document.getElementById("saveImageBtn");
+
+  const newRainbowBtn =
+    document.getElementById("newRainbowBtn");
+
+  let detector = null;
+  let state = freshCircleState();
+  let runToken = 0;
+
+  /*
+  SESSION SEARCH STATE
+
+  This survives RESET, but disappears naturally if the page
+  is reloaded.
+
+  reset  = new circle, continue deeper into Commons
+  reload = new session, start from the beginning
+
+  No localStorage and no backend.
+  */
+  const searchSession = {
+    queue: [],
+    seenTitles: new Set(),
+    categoryIndex: 0,
+    categoryStates:
+      CATEGORIES.map(() => ({
+        continueToken: null,
+        exhausted: false
+      }))
+  };
+
+  function freshCircleState() {
+    return {
+      searched: 0,
+      accepted: 0,
+      coveredSectors: new Array(72).fill(false),
+      complete: false,
+      fragments: [],
+      paused: false
+    };
+  }
+
+  /*
+  ============================================================
+  MODEL
+  ============================================================
+  */
+
+  async function loadDetector() {
+    try {
+      setStatus(
+        "loading…",
+        true
+      );
+
+      detector =
+        await pipeline(
+          "zero-shot-object-detection",
+          MODEL
+        );
+
+      setStatus(
+        "searching for rainbows…",
+        false
+      );
+
+      saveImageBtn.classList.remove(
+        "is-visible"
+      );
+
+      newRainbowBtn.classList.remove(
+        "is-visible"
+      );
+
+      run();
+    }
+    catch (err) {
+      console.error(
+        "Could not load detector:",
+        err
+      );
+
+      setStatus(
+        "detector failed to load",
+        false
+      );
+    }
+  }
+
+  /*
+  ============================================================
+  DISPLAY
+  ============================================================
+  */
+
+  function resizeCanvas() {
+    const rect =
+      canvas.getBoundingClientRect();
+
+    const dpr =
+      Math.min(
+        window.devicePixelRatio || 1,
+        2
+      );
+
+    const px =
+      Math.max(
+        320,
+        Math.round(
+          rect.width * dpr
+        )
+      );
+
+    if (
+      canvas.width !== px ||
+      canvas.height !== px
+    ) {
+      canvas.width = px;
+      canvas.height = px;
+
+      drawAll();
+    }
+  }
+
+  function drawAll() {
+    const w = canvas.width;
+    const h = canvas.height;
+
+    ctx.clearRect(
+      0,
+      0,
+      w,
+      h
+    );
+
+    const cx = w / 2;
+    const cy = h / 2;
+
+    /*
+    Invisible target circle.
+    */
+    const targetR =
+      Math.min(w, h) * 0.27;
+
+    for (
+      const fragment
+      of state.fragments
+    ) {
+      drawFragment(
+        fragment,
+        cx,
+        cy,
+        targetR
+      );
+    }
+  }
+
+  /*
+  ============================================================
+  SAFE PLACEMENT
+  ============================================================
+
+  Large images are still allowed.
+
+  We do NOT scale them down to fit.
+  Instead, if a rotated image would extend beyond the canvas,
+  its centre is moved slightly inward toward the centre.
+
+  This preserves the size variation while avoiding hard crops
+  at the canvas edge.
+  ============================================================
+  */
+
+  function getSafeFragmentPosition(
+    fragment,
+    cx,
+    cy,
+    targetR,
+    canvasW,
+    canvasH
+  ) {
+    const img =
+      fragment.canvas;
+
+    const angle =
+      fragment.angle;
+
+    const aspect =
+      img.width /
+      Math.max(
+        img.height,
+        1
+      );
+
+    const drawH =
+      targetR *
+      fragment.scale;
+
+    const drawW =
+      drawH *
+      aspect *
+      fragment.widthScale;
+
+    const rotation =
+      angle +
+      Math.PI / 2 +
+      fragment.rotationError;
+
+    /*
+    Axis-aligned bounding box of the rotated rectangle.
+    */
+    const cos =
+      Math.abs(
+        Math.cos(
+          rotation
+        )
+      );
+
+    const sin =
+      Math.abs(
+        Math.sin(
+          rotation
+        )
+      );
+
+    const boundW =
+      drawW * cos +
+      drawH * sin;
+
+    const boundH =
+      drawW * sin +
+      drawH * cos;
+
+    /*
+    Initial position.
+    */
+    let radius =
+      targetR +
+      fragment.radialOffset;
+
+    /*
+    Keep a small black margin around the composition.
+    */
+    const margin =
+      Math.max(
+        12,
+        Math.min(
+          canvasW,
+          canvasH
+        ) * 0.025
+      );
+
+    /*
+    Move the fragment inward iteratively until its rotated
+    bounding box fits, or until it reaches the centre.
+    */
+    for (
+      let attempt = 0;
+      attempt < 24;
+      attempt += 1
+    ) {
+      const x =
+        cx +
+        Math.cos(angle) *
+        radius;
+
+      const y =
+        cy +
+        Math.sin(angle) *
+        radius;
+
+      const left =
+        x -
+        boundW / 2;
+
+      const right =
+        x +
+        boundW / 2;
+
+      const top =
+        y -
+        boundH / 2;
+
+      const bottom =
+        y +
+        boundH / 2;
+
+      const fits =
+        left >= margin &&
+        right <=
+          canvasW - margin &&
+        top >= margin &&
+        bottom <=
+          canvasH - margin;
+
+      if (fits) {
+        return {
+          x,
+          y,
+          drawW,
+          drawH
+        };
+      }
+
+      /*
+      Only move inward.
+      Image size stays unchanged.
+      */
+      radius *= 0.94;
+    }
+
+    /*
+    Final fallback: draw as far inward as we got.
+    */
+    return {
+      x:
+        cx +
+        Math.cos(angle) *
+        radius,
+
+      y:
+        cy +
+        Math.sin(angle) *
+        radius,
+
+      drawW,
+      drawH
+    };
+  }
+
+  function drawFragment(
+    fragment,
+    cx,
+    cy,
+    targetR
+  ) {
+    const img =
+      fragment.canvas;
+
+    const angle =
+      fragment.angle;
+
+    const placement =
+      getSafeFragmentPosition(
+        fragment,
+        cx,
+        cy,
+        targetR,
+        canvas.width,
+        canvas.height
+      );
+
+    const x =
+      placement.x;
+
+    const y =
+      placement.y;
+
+    const drawW =
+      placement.drawW;
+
+    const drawH =
+      placement.drawH;
+
+    ctx.save();
+
+    ctx.translate(
+      x,
+      y
+    );
+
+    ctx.rotate(
+      angle +
+      Math.PI / 2 +
+      fragment.rotationError
+    );
+
+    ctx.scale(
+      fragment.flipX
+        ? -1
+        : 1,
+
+      fragment.flipY
+        ? -1
+        : 1
+    );
+
+    ctx.globalAlpha =
+      fragment.alpha;
+
+    ctx.drawImage(
+      img,
+
+      -drawW / 2,
+      -drawH / 2,
+
+      drawW,
+      drawH
+    );
+
+    ctx.restore();
+  }
+
+  /*
+  ============================================================
+  WIKIMEDIA COMMONS
+  ============================================================
+  */
+
+  async function refillQueue() {
+    if (state.complete) {
+      return;
+    }
+
+    setStatus(
+      "searching for rainbows…",
+      true
+    );
+
+    let attempts = 0;
+    let categoryIndex = -1;
+
+    while (
+      attempts < CATEGORIES.length
+    ) {
+      const index =
+        searchSession.categoryIndex %
+        CATEGORIES.length;
+
+      searchSession.categoryIndex =
+        (
+          searchSession.categoryIndex + 1
+        ) %
+        CATEGORIES.length;
+
+      attempts += 1;
+
+      if (
+        !searchSession
+          .categoryStates[index]
+          .exhausted
+      ) {
+        categoryIndex = index;
+        break;
+      }
+    }
+
+    if (categoryIndex === -1) {
+      setStatus(
+        "Commons search exhausted for this session",
+        false
+      );
+      return;
+    }
+
+    const category =
+      CATEGORIES[categoryIndex];
+
+    const categoryState =
+      searchSession
+        .categoryStates[categoryIndex];
+
+    const params =
+      new URLSearchParams({
+        origin: "*",
+        action: "query",
+        format: "json",
+        formatversion: "2",
+        generator: "categorymembers",
+        gcmtitle: category,
+        gcmtype: "file",
+        gcmlimit: "50",
+        prop: "imageinfo",
+        iiprop: "url|mime|size",
+        iiurlwidth:
+          String(
+            THUMB_WIDTH
+          )
+      });
+
+    if (
+      categoryState.continueToken
+    ) {
+      params.set(
+        "gcmcontinue",
+        categoryState.continueToken
+      );
+    }
+
+    try {
+      const response =
+        await fetch(
+          `${API}?${params.toString()}`
+        );
+
+      if (!response.ok) {
+        throw new Error(
+          `HTTP ${response.status}`
+        );
+      }
+
+      const data =
+        await response.json();
+
+      const pages =
+        data?.query?.pages ||
+        [];
+
+      const nextToken =
+        data?.continue?.gcmcontinue ||
+        null;
+
+      categoryState.continueToken =
+        nextToken;
+
+      if (!nextToken) {
+        categoryState.exhausted =
+          true;
+      }
+
+      const candidates =
+        pages
+          .map(
+            page => {
+              const info =
+                page.imageinfo?.[0];
+
+              return {
+                title:
+                  page.title,
+
+                thumburl:
+                  info?.thumburl ||
+                  info?.url,
+
+                descriptionurl:
+                  info?.descriptionurl,
+
+                mime:
+                  info?.mime || ""
+              };
+            }
+          )
+          .filter(
+            item =>
+              item.thumburl
+          )
+          .filter(
+            item =>
+              /^image\/(jpeg|png|webp)$/i
+                .test(
+                  item.mime
+                )
+          )
+          .filter(
+            item =>
+              !/circular rainbow/i
+                .test(
+                  item.title
+                )
+          );
+
+      for (
+        const item
+        of candidates
+      ) {
+        if (
+          !searchSession.seenTitles
+            .has(
+              item.title
+            )
+        ) {
+          searchSession.seenTitles
+            .add(
+              item.title
+            );
+
+          searchSession.queue
+            .push(
+              item
+            );
+        }
+      }
+
+      if (
+        searchSession.queue.length === 0 &&
+        !allCategoriesExhausted()
+      ) {
+        await refillQueue();
+      }
+    }
+    catch (err) {
+      console.warn(
+        "Commons error:",
+        err
+      );
+
+      setStatus(
+        "Commons query failed",
+        false
+      );
+    }
+  }
+
+  function allCategoriesExhausted() {
+    return searchSession
+      .categoryStates
+      .every(
+        item =>
+          item.exhausted
+      );
+  }
+
+  /*
+  ============================================================
+  DETECT THE RAINBOW
+  ============================================================
+  */
+
+  async function inspectItem(
+    item,
+    token
+  ) {
+
+    setStatus(
+      "looking for a rainbow…",
+      true
+    );
+
+    let img;
+
+    try {
+      img =
+        await loadImage(
+          item.thumburl
+        );
+    }
+    catch {
+      setStatus(
+        "image failed",
+        false
+      );
+      return;
+    }
+
+    if (
+      token !== runToken ||
+      state.paused
+    ) {
+      return;
+    }
+
+    state.searched += 1;
+    updateHud();
+
+    let detections;
+
+    try {
+      /*
+      Transformers.js zero-shot object detection.
+
+      Input is the Commons thumbnail URL.
+      Output includes:
+      label
+      score
+      box { xmin, ymin, xmax, ymax }
+      */
+      detections =
+        await detector(
+          item.thumburl,
+          LABELS,
+          {
+            threshold:
+              MODEL_THRESHOLD,
+
+            topk: 8
+          }
+        );
+    }
+    catch (err) {
+      console.warn(
+        "Detection failed:",
+        err
+      );
+
+      setStatus(
+        "model error",
+        false
+      );
+
+      return;
+    }
+
+    if (
+      token !== runToken ||
+      state.paused
+    ) {
+      return;
+    }
+
+    const best =
+      chooseBestRainbowDetection(
+        detections,
+        img
+      );
+
+    if (!best) {
+
+      setStatus(
+        "searching for rainbows…",
+        false
+      );
+
+      return;
+    }
+
+    if (
+      best.score <
+      ACCEPT_SCORE
+    ) {
+      setStatus(
+        "searching for rainbows…",
+        false
+      );
+
+      return;
+    }
+
+    const crop =
+      extractDetection(
+        img,
+        best.box
+      );
+
+    if (!crop) {
+      setStatus(
+        "crop failed",
+        false
+      );
+
+      return;
+    }
+
+    acceptFragment(
+      crop,
+      best,
+      item
+    );
+
+    setStatus(
+      "trying to complete the circle…",
+      false
+    );
+  }
+
+  function chooseBestRainbowDetection(
+    detections,
+    img
+  ) {
+    if (
+      !Array.isArray(
+        detections
+      ) ||
+      !detections.length
+    ) {
+      return null;
+    }
+
+    const usable =
+      detections
+        .filter(
+          d =>
+            d &&
+            d.box &&
+            Number.isFinite(
+              d.score
+            )
+        )
+        .filter(
+          d =>
+            /rainbow/i
+              .test(
+                d.label || ""
+              )
+        )
+        .map(
+          d => {
+            const box =
+              normalizeBox(
+                d.box,
+                img.width,
+                img.height
+              );
+
+            const width =
+              Math.max(
+                1,
+                box.xmax -
+                box.xmin
+              );
+
+            const height =
+              Math.max(
+                1,
+                box.ymax -
+                box.ymin
+              );
+
+            const area =
+              width *
+              height;
+
+            const imageArea =
+              img.width *
+              img.height;
+
+            const areaRatio =
+              area /
+              Math.max(
+                imageArea,
+                1
+              );
+
+            /*
+            Penalize boxes that cover nearly the whole photo.
+            We want localisation, not "this whole image is rainbow".
+            */
+            let adjusted =
+              d.score;
+
+            if (
+              areaRatio >
+              0.72
+            ) {
+              adjusted *=
+                0.55;
+            }
+
+            /*
+            Very tiny detections can also be suspicious.
+            */
+            if (
+              areaRatio <
+              0.002
+            ) {
+              adjusted *=
+                0.55;
+            }
+
+            /*
+            Rainbows are often somewhat elongated.
+            Small bonus only — not a requirement.
+            */
+            const aspect =
+              Math.max(
+                width / height,
+                height / width
+              );
+
+            if (
+              aspect > 1.35
+            ) {
+              adjusted *=
+                1.08;
+            }
+
+            return {
+              ...d,
+              score:
+                clamp(
+                  adjusted,
+                  0,
+                  1
+                ),
+              box
+            };
+          }
+        )
+        .sort(
+          (a, b) =>
+            b.score -
+            a.score
+        );
+
+    return (
+      usable[0] ||
+      null
+    );
+  }
+
+  /*
+  Transformers.js may return pixel coordinates.
+  This function simply clamps them safely.
+  */
+  function normalizeBox(
+    box,
+    width,
+    height
+  ) {
+    return {
+      xmin:
+        clamp(
+          box.xmin,
+          0,
+          width
+        ),
+
+      ymin:
+        clamp(
+          box.ymin,
+          0,
+          height
+        ),
+
+      xmax:
+        clamp(
+          box.xmax,
+          0,
+          width
+        ),
+
+      ymax:
+        clamp(
+          box.ymax,
+          0,
+          height
+        )
+    };
+  }
+
+  /*
+  ============================================================
+  CROP REAL RAINBOW
+  ============================================================
+
+  No bending.
+  No stripe manipulation.
+
+  We simply crop the real model-detected region,
+  leaving some photographic context around it.
+  ============================================================
+  */
+
+  function extractDetection(
+    img,
+    box
+  ) {
+    const boxW =
+      Math.max(
+        1,
+        box.xmax -
+        box.xmin
+      );
+
+    const boxH =
+      Math.max(
+        1,
+        box.ymax -
+        box.ymin
+      );
+
+    const padX =
+      boxW *
+      BOX_PADDING_X;
+
+    const padY =
+      boxH *
+      BOX_PADDING_Y;
+
+    const sx =
+      clamp(
+        box.xmin -
+        padX,
+        0,
+        img.width
+      );
+
+    const sy =
+      clamp(
+        box.ymin -
+        padY,
+        0,
+        img.height
+      );
+
+    const ex =
+      clamp(
+        box.xmax +
+        padX,
+        0,
+        img.width
+      );
+
+    const ey =
+      clamp(
+        box.ymax +
+        padY,
+        0,
+        img.height
+      );
+
+    const sw =
+      ex - sx;
+
+    const sh =
+      ey - sy;
+
+    if (
+      sw < 10 ||
+      sh < 10
+    ) {
+      return null;
+    }
+
+    const OUT_W = 520;
+
+    const OUT_H =
+      clamp(
+        Math.round(
+          OUT_W *
+          sh /
+          sw
+        ),
+        120,
+        480
+      );
+
+    workCanvas.width =
+      OUT_W;
+
+    workCanvas.height =
+      OUT_H;
+
+    workCtx.clearRect(
+      0,
+      0,
+      OUT_W,
+      OUT_H
+    );
+
+    workCtx.drawImage(
+      img,
+
+      sx,
+      sy,
+      sw,
+      sh,
+
+      0,
+      0,
+      OUT_W,
+      OUT_H
+    );
+
+    /*
+    CLEAN EDGES
+
+    No artificial feathering, vignette or alpha mask.
+    The crop remains exactly as it appears in the source image.
+    */
+
+    const out =
+      document.createElement(
+        "canvas"
+      );
+
+    out.width =
+      OUT_W;
+
+    out.height =
+      OUT_H;
+
+    out
+      .getContext("2d")
+      .drawImage(
+        workCanvas,
+        0,
+        0
+      );
+
+    return out;
+  }
+
+  /*
+  ============================================================
+  PLACE FRAGMENT
+  ============================================================
+  */
+
+  function acceptFragment(
+    fragmentCanvas,
+    detection,
+    item
+  ) {
+    const angle =
+      choosePlacementAngle();
+
+    state.fragments.push({
+      canvas:
+        fragmentCanvas,
+
+      title:
+        item.title,
+
+      detectionLabel:
+        detection.label,
+
+      detectionScore:
+        detection.score,
+
+      angle,
+
+      /*
+      Back to the rougher visual behaviour.
+      */
+      scale:
+        randomRange(
+          0.34,
+          0.96
+        ),
+
+      widthScale:
+        randomRange(
+          0.82,
+          1.24
+        ),
+
+      radialOffset:
+        randomRange(
+          -82,
+          82
+        ),
+
+      rotationError:
+        degToRad(
+          randomRange(
+            -30,
+            30
+          )
+        ),
+
+      flipX:
+        Math.random() <
+        0.42,
+
+      flipY:
+        Math.random() <
+        0.05,
+
+      alpha:
+        Math.random() < 0.14
+          ? randomRange(
+              0.98,
+              1
+            )
+          : randomRange(
+              0.86,
+              0.94
+            )
+    });
+
+    state.accepted += 1;
+
+    /*
+    Real completion logic:
+    mark the actual sectors this newly placed fragment covers.
+    */
+    markFragmentCoverage(
+      state.fragments[
+        state.fragments.length - 1
+      ]
+    );
+
+    /*
+    Keep autonomous replacement alive.
+    */
+    if (
+      state.fragments.length >
+      46
+    ) {
+      const index =
+        Math.floor(
+          Math.random() *
+          Math.min(
+            12,
+            state.fragments.length
+          )
+        );
+
+      state.fragments.splice(
+        index,
+        1
+      );
+    }
+
+    drawAll();
+    updateHud();
+
+    checkCompletion();
+  }
+
+  function choosePlacementAngle() {
+    const sectors =
+      state.coveredSectors.length;
+
+    const empty = [];
+
+    for (let i = 0; i < sectors; i += 1) {
+      if (!state.coveredSectors[i]) {
+        empty.push(i);
+      }
+    }
+
+    /*
+    Usually aim directly at an uncovered sector.
+
+    But 15% of the time the system makes a bad decision and
+    places the new rainbow somewhere else. This preserves the
+    rough overlapping behaviour without allowing it to ignore
+    gaps most of the time.
+    */
+    let sector;
+
+    if (
+      empty.length &&
+      Math.random() >= 0.15
+    ) {
+      /*
+      Prefer the centre of the largest remaining gap.
+      */
+      sector =
+        centreOfLargestGap(
+          state.coveredSectors
+        );
+    }
+    else {
+      sector =
+        Math.floor(
+          Math.random() *
+          sectors
+        );
+    }
+
+    const base =
+      (
+        sector +
+        0.5
+      ) /
+      sectors *
+      Math.PI *
+      2;
+
+    return (
+      base +
+      degToRad(
+        randomRange(
+          -7,
+          7
+        )
+      )
+    );
+  }
+
+  function centreOfLargestGap(
+    covered
+  ) {
+    const n =
+      covered.length;
+
+    let bestStart = 0;
+    let bestLength = 0;
+
+    /*
+    Search two revolutions so gaps crossing 0° are handled.
+    */
+    let currentStart = 0;
+    let currentLength = 0;
+
+    for (
+      let i = 0;
+      i < n * 2;
+      i += 1
+    ) {
+      const index =
+        i % n;
+
+      if (!covered[index]) {
+        if (currentLength === 0) {
+          currentStart = i;
+        }
+
+        currentLength += 1;
+
+        if (
+          currentLength > bestLength &&
+          currentLength <= n
+        ) {
+          bestLength =
+            currentLength;
+
+          bestStart =
+            currentStart;
+        }
+      }
+      else {
+        currentLength = 0;
+      }
+    }
+
+    if (bestLength === 0) {
+      return Math.floor(
+        Math.random() *
+        n
+      );
+    }
+
+    return (
+      Math.floor(
+        bestStart +
+        bestLength / 2
+      ) %
+      n
+    );
+  }
+
+  function markFragmentCoverage(
+    fragment
+  ) {
+    const sectors =
+      state.coveredSectors.length;
+
+    /*
+    Approximate the angular width of the placed photographic
+    fragment at the target ring.
+
+    This is based on its actual displayed width rather than a
+    fake percentage counter.
+    */
+    const w =
+      canvas.width;
+
+    const targetR =
+      w * 0.27;
+
+    const aspect =
+      fragment.canvas.width /
+      Math.max(
+        fragment.canvas.height,
+        1
+      );
+
+    const drawH =
+      targetR *
+      fragment.scale;
+
+    const drawW =
+      drawH *
+      aspect *
+      fragment.widthScale;
+
+    /*
+    Arc angle subtended by the fragment.
+
+    Cap it so one enormous photograph cannot falsely complete
+    half the circle by itself.
+    */
+    const angularWidth =
+      clamp(
+        2 *
+        Math.atan2(
+          drawW / 2,
+          targetR
+        ),
+        degToRad(5),
+        degToRad(42)
+      );
+
+    const sectorSize =
+      Math.PI *
+      2 /
+      sectors;
+
+    const halfCount =
+      Math.max(
+        0,
+        Math.floor(
+          angularWidth /
+          sectorSize /
+          2
+        )
+      );
+
+    let centre =
+      Math.floor(
+        normalizeAngle(
+          fragment.angle
+        ) /
+        (
+          Math.PI *
+          2
+        ) *
+        sectors
+      );
+
+    centre =
+      clamp(
+        centre,
+        0,
+        sectors - 1
+      );
+
+    for (
+      let offset =
+        -halfCount;
+      offset <=
+        halfCount;
+      offset += 1
+    ) {
+      const index =
+        (
+          centre +
+          offset +
+          sectors
+        ) %
+        sectors;
+
+      state.coveredSectors[index] =
+        true;
+    }
+  }
+
+  function normalizeAngle(
+    angle
+  ) {
+    let value =
+      angle %
+      (
+        Math.PI *
+        2
+      );
+
+    if (value < 0) {
+      value +=
+        Math.PI *
+        2;
+    }
+
+    return value;
+  }
+
+  function checkCompletion() {
+    if (
+      state.complete
+    ) {
+      return true;
+    }
+
+    const complete =
+      state.coveredSectors
+        .every(Boolean);
+
+    if (!complete) {
+      return false;
+    }
+
+    state.complete = true;
+    state.paused = true;
+
+    setStatus(
+      "complete",
+      false
+    );
+
+    saveImageBtn.classList.add(
+      "is-visible"
+    );
+
+    newRainbowBtn.classList.add(
+      "is-visible"
+    );
+
+    /*
+    Incrementing runToken stops the autonomous search loop.
+    No more Commons images are requested and no more model
+    detections are run.
+    */
+    runToken += 1;
+
+    return true;
+  }
+
+  /*
+  ============================================================
+  LOOP
+  ============================================================
+  */
+
+  async function run() {
+    const token =
+      ++runToken;
+
+    while (
+      token === runToken
+    ) {
+      if (
+        state.complete
+      ) {
+        return;
+      }
+
+      if (
+        state.paused
+      ) {
+        await sleep(250);
+        continue;
+      }
+
+      if (
+        searchSession.queue.length <
+        5
+      ) {
+        await refillQueue();
+      }
+
+      if (
+        token !== runToken
+      ) {
+        return;
+      }
+
+      const item =
+        searchSession.queue.shift();
+
+      if (!item) {
+        await sleep(800);
+        continue;
+      }
+
+      await inspectItem(
+        item,
+        token
+      );
+
+      await sleep(
+        SEARCH_DELAY_MS
+      );
+    }
+  }
+
+  /*
+  ============================================================
+  SAVE IMAGE — 3000 × 3000 PNG
+  ============================================================
+
+  Re-renders the final composition at 3000 × 3000 px
+  with a solid black background.
+  ============================================================
+  */
+
+  function renderCompositionToCanvas(
+    targetCanvas
+  ) {
+    const targetCtx =
+      targetCanvas.getContext(
+        "2d"
+      );
+
+    const size =
+      targetCanvas.width;
+
+    const cx =
+      size / 2;
+
+    const cy =
+      size / 2;
+
+    const targetR =
+      size * 0.27;
+
+    targetCtx.save();
+
+    targetCtx.globalAlpha = 1;
+
+    targetCtx.fillStyle =
+      "#020202";
+
+    targetCtx.fillRect(
+      0,
+      0,
+      size,
+      size
+    );
+
+    targetCtx.restore();
+
+    /*
+    Screen offsets must scale proportionally into export space.
+    */
+    const screenBase =
+      Math.max(
+        canvas.width,
+        1
+      );
+
+    const offsetScale =
+      size /
+      screenBase;
+
+    for (
+      const fragment
+      of state.fragments
+    ) {
+      const img =
+        fragment.canvas;
+
+      const angle =
+        fragment.angle;
+
+      const aspect =
+        img.width /
+        Math.max(
+          img.height,
+          1
+        );
+
+      const drawH =
+        targetR *
+        fragment.scale;
+
+      const drawW =
+        drawH *
+        aspect *
+        fragment.widthScale;
+
+      const rotation =
+        angle +
+        Math.PI / 2 +
+        fragment.rotationError;
+
+      const cos =
+        Math.abs(
+          Math.cos(
+            rotation
+          )
+        );
+
+      const sin =
+        Math.abs(
+          Math.sin(
+            rotation
+          )
+        );
+
+      const boundW =
+        drawW * cos +
+        drawH * sin;
+
+      const boundH =
+        drawW * sin +
+        drawH * cos;
+
+      let radius =
+        targetR +
+        fragment.radialOffset *
+        offsetScale;
+
+      const margin =
+        size * 0.025;
+
+      let x = cx;
+      let y = cy;
+
+      for (
+        let attempt = 0;
+        attempt < 24;
+        attempt += 1
+      ) {
+        x =
+          cx +
+          Math.cos(angle) *
+          radius;
+
+        y =
+          cy +
+          Math.sin(angle) *
+          radius;
+
+        const fits =
+          x - boundW / 2 >= margin &&
+          x + boundW / 2 <=
+            size - margin &&
+          y - boundH / 2 >= margin &&
+          y + boundH / 2 <=
+            size - margin;
+
+        if (fits) {
+          break;
+        }
+
+        radius *= 0.94;
+      }
+
+      targetCtx.save();
+
+      targetCtx.translate(
+        x,
+        y
+      );
+
+      targetCtx.rotate(
+        rotation
+      );
+
+      targetCtx.scale(
+        fragment.flipX
+          ? -1
+          : 1,
+
+        fragment.flipY
+          ? -1
+          : 1
+      );
+
+      targetCtx.globalAlpha =
+        fragment.alpha;
+
+      targetCtx.drawImage(
+        img,
+
+        -drawW / 2,
+        -drawH / 2,
+
+        drawW,
+        drawH
+      );
+
+      targetCtx.restore();
+    }
+  }
+
+  function saveHighResolutionImage() {
+    const EXPORT_SIZE =
+      3000;
+
+    const exportCanvas =
+      document.createElement(
+        "canvas"
+      );
+
+    exportCanvas.width =
+      EXPORT_SIZE;
+
+    exportCanvas.height =
+      EXPORT_SIZE;
+
+    renderCompositionToCanvas(
+      exportCanvas
+    );
+
+    exportCanvas.toBlob(
+      blob => {
+        if (!blob) {
+          return;
+        }
+
+        const url =
+          URL.createObjectURL(
+            blob
+          );
+
+        const now =
+          new Date();
+
+        const pad =
+          value =>
+            String(value)
+              .padStart(
+                2,
+                "0"
+              );
+
+        const filename =
+          `rainbow-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}-3000x3000.png`;
+
+        const link =
+          document.createElement(
+            "a"
+          );
+
+        link.href =
+          url;
+
+        link.download =
+          filename;
+
+        document.body.appendChild(
+          link
+        );
+
+        link.click();
+
+        link.remove();
+
+        setTimeout(
+          () =>
+            URL.revokeObjectURL(
+              url
+            ),
+          1000
+        );
+      },
+      "image/png"
+    );
+  }
+
+  saveImageBtn.addEventListener(
+    "click",
+    () => {
+      if (!state.complete) {
+        return;
+      }
+
+      saveHighResolutionImage();
+    }
+  );
+
+  /*
+  ============================================================
+  NEW RAINBOW
+  ============================================================
+
+  The button only appears after completion.
+
+  It clears the finished circle, but the in-memory Commons
+  session continues where it left off.
+  ============================================================
+  */
+
+  newRainbowBtn.addEventListener(
+    "click",
+    () => {
+      runToken += 1;
+
+      state =
+        freshCircleState();
+
+      saveImageBtn.classList.remove(
+        "is-visible"
+      );
+
+      newRainbowBtn.classList.remove(
+        "is-visible"
+      );
+
+      updateHud();
+      drawAll();
+
+      setStatus(
+        "searching for rainbows…",
+        false
+      );
+
+      run();
+    }
+  );
+
+  window.addEventListener(
+    "resize",
+    resizeCanvas
+  );
+
+  /*
+  ============================================================
+  HELPERS
+  ============================================================
+  */
+
+  function loadImage(
+    url
+  ) {
+    return new Promise(
+      (
+        resolve,
+        reject
+      ) => {
+        const img =
+          new Image();
+
+        img.crossOrigin =
+          "anonymous";
+
+        img.decoding =
+          "async";
+
+        img.onload =
+          () =>
+            resolve(img);
+
+        img.onerror =
+          reject;
+
+        img.src =
+          url;
+      }
+    );
+  }
+
+  function updateHud() {
+    /*
+    V11 deliberately exposes no counters or technical UI.
+    */
+  }
+
+  function setStatus(
+    text,
+    loading
+  ) {
+    statusEl.textContent =
+      text;
+  }
+
+  function clamp(
+    value,
+    min,
+    max
+  ) {
+    return Math.max(
+      min,
+      Math.min(
+        max,
+        value
+      )
+    );
+  }
+
+  function degToRad(
+    deg
+  ) {
+    return (
+      deg *
+      Math.PI /
+      180
+    );
+  }
+
+  function randomRange(
+    min,
+    max
+  ) {
+    return (
+      min +
+      Math.random() *
+      (
+        max -
+        min
+      )
+    );
+  }
+
+  function sleep(
+    ms
+  ) {
+    return new Promise(
+      resolve =>
+        setTimeout(
+          resolve,
+          ms
+        )
+    );
+  }
+
+  function lightShuffle(
+    array
+  ) {
+    /*
+    Partial shuffle:
+    retain some filename preference while avoiding
+    exactly the same order every run.
+    */
+    for (
+      let i =
+        array.length - 1;
+      i > 0;
+      i -= 1
+    ) {
+      if (
+        Math.random() <
+        0.45
+      ) {
+        const j =
+          Math.floor(
+            Math.random() *
+            (
+              i + 1
+            )
+          );
+
+        [
+          array[i],
+          array[j]
+        ] = [
+          array[j],
+          array[i]
+        ];
+      }
+    }
+  }
+
+  /*
+  ============================================================
+  START
+  ============================================================
+  */
+
+  updateHud();
+  resizeCanvas();
+  loadDetector();
+
+})();
+</script>
+
+</body>
+</html>
