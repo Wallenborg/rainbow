@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Trying to Complete the Rainbow</title>
 
+  <script>
+    // Classify phones before any artwork or AI initialization. Tablets and
+    // narrow desktop windows keep the existing artwork experience.
+    window.rainbowPhone = navigator.userAgentData?.mobile === true ||
+      /iPhone|iPod|Android.*Mobile|Windows Phone|BlackBerry|BB10|Opera Mini|IEMobile/i.test(navigator.userAgent);
+    if (window.rainbowPhone) document.documentElement.classList.add("is-phone");
+  </script>
+
   <style>
     :root {
       color-scheme: dark;
@@ -27,6 +35,35 @@
       color: var(--fg);
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     }
+
+    #phoneFallback { display: none; }
+
+    .is-phone body { background: #000; }
+    .is-phone #app, .is-phone #workCanvas { display: none; }
+    .is-phone #phoneFallback {
+      position: fixed;
+      inset: 0;
+      height: var(--phone-height, 100%);
+      display: grid;
+      place-items: center;
+      overflow: auto;
+      padding: calc(24px + env(safe-area-inset-top, 0px))
+        calc(24px + env(safe-area-inset-right, 0px))
+        calc(24px + env(safe-area-inset-bottom, 0px))
+        calc(24px + env(safe-area-inset-left, 0px));
+      background: #000;
+      color: #fff;
+      text-align: center;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    #phoneFallback h1 {
+      margin: 0 0 20px;
+      font: inherit;
+      font-weight: 600;
+    }
+    #phoneFallback p { margin: 0; }
+    #phoneFallback p + p { margin-top: 16px; }
 
     #app {
       --viewport-height: 100vh;
@@ -122,6 +159,13 @@
 </head>
 
 <body>
+<section id="phoneFallback" aria-labelledby="phoneTitle">
+  <div>
+    <h1 id="phoneTitle">Trying to Complete the Rainbow</h1>
+    <p>This artwork requires a desktop browser.</p>
+    <p>Please visit this page on a computer to experience the work.</p>
+  </div>
+</section>
 <main id="app">
 
   <section id="stage">
@@ -141,6 +185,18 @@
 <script>
 // Layout and initial status do not depend on the CDN, worker or AI runtime.
 (() => {
+  if (window.rainbowPhone) {
+    function fitPhoneViewport() {
+      const viewport = window.visualViewport;
+      const height = viewport && viewport.scale === 1
+        ? Math.min(window.innerHeight, viewport.height) : window.innerHeight;
+      document.documentElement.style.setProperty("--phone-height", height + "px");
+    }
+    window.addEventListener("resize", fitPhoneViewport);
+    window.visualViewport?.addEventListener("resize", fitPhoneViewport);
+    fitPhoneViewport();
+    return;
+  }
   const app = document.getElementById("app");
   const stage = document.getElementById("stage");
   const canvas = document.getElementById("circleCanvas");
@@ -177,6 +233,9 @@ let pipeline, RawImage, env;
 
 (() => {
   "use strict";
+
+  // Exit before canvas setup, library import, workers, or model requests.
+  if (window.rainbowPhone) return;
 
   /*
   ============================================================
