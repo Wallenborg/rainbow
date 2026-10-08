@@ -5,7 +5,7 @@ const assert = require('assert/strict');
  const browser=await puppeteer.launch({executablePath:process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true,timeout:120000,args:['--no-sandbox']});
  try {
  const page=await browser.newPage(); const errors=[];page.on('pageerror',e=>errors.push(String(e)));
- const html=fs.readFileSync(process.cwd()+'/index.html','utf8').replace(/import \{[\s\S]*?from "https:[^"]+";/,`const env = {}; const pipeline = async () => window.mockDetector;
+ const html=fs.readFileSync(process.cwd()+'/index.html','utf8').replace(/let pipeline, RawImage, env;/,`const env = {}; const pipeline = async () => window.mockDetector;
  const RawImage = {fromCanvas: c => ({width:c.width,height:c.height,data:c.getContext('2d').getImageData(0,0,c.width,c.height).data})};`).replace('  loadDetector();',`  window.artTest = { acceptFragment, fragmentCoverage, recomputeCoverage, checkCompletion, renderCompositionToCanvas, prepareImage, inspectItem, inferSerial, createBrowserDetector, refillQueue, searchSession, getSafeFragmentPosition, get state(){return state}, setDetector(d){detector=d}, get token(){return runToken} };`);
  await page.setRequestInterception(true);
  page.on('request',req=>{

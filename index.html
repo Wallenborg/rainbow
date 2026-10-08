@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Trying to Complete the Rainbow</title>
 
   <style>
@@ -29,46 +29,58 @@
     }
 
     #app {
+      --viewport-height: 100vh;
       position: relative;
-      width: 100vw;
-      height: 100dvh;
-      min-height: 100vh;
-      overflow: hidden;
+      width: 100%;
+      height: var(--viewport-height);
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
+      padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+        env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
       background: var(--bg);
     }
 
+    @supports (height: 100svh) {
+      #app { --viewport-height: 100svh; }
+    }
+
+    @supports (height: 100dvh) {
+      #app { --viewport-height: 100dvh; }
+    }
+
     #stage {
-      position: absolute;
-      inset: 0;
+      min-width: 0;
+      min-height: 0;
       display: grid;
       place-items: center;
-      padding: 22px 22px 54px;
+      padding: 22px 22px 0;
     }
 
     #circleCanvas {
       display: block;
-      width: min(calc(100vw - 44px), calc(100dvh - 76px));
-      height: min(calc(100vw - 44px), calc(100dvh - 76px));
-      max-width: 100%;
-      max-height: 100%;
+      width: var(--canvas-size, 0px);
+      height: var(--canvas-size, 0px);
     }
 
     #minimalUi {
-      position: absolute;
-      left: 18px;
-      bottom: 16px;
       z-index: 10;
       display: flex;
+      flex-wrap: wrap;
+      align-content: flex-end;
       align-items: center;
-      gap: 12px;
-      max-width: calc(100vw - 36px);
+      column-gap: 12px;
+      row-gap: 4px;
+      min-width: 0;
+      min-height: 54px;
+      padding: 8px 18px 16px;
       font-size: 11px;
       line-height: 1.3;
     }
 
     #status {
       color: var(--muted);
-      white-space: nowrap;
+      overflow-wrap: anywhere;
+      max-width: 100%;
     }
 
     #saveImageBtn,
@@ -76,12 +88,14 @@
       display: none;
       appearance: none;
       border: 0;
-      border-bottom: 1px solid currentColor;
-      padding: 0 0 2px;
+      padding: 0;
       background: transparent;
       color: var(--fg);
       font: inherit;
+      text-decoration: underline;
+      text-underline-offset: 3px;
       cursor: pointer;
+      touch-action: manipulation;
     }
 
     #saveImageBtn.is-visible,
@@ -89,24 +103,19 @@
       display: inline-block;
     }
 
+    @media (pointer: coarse) {
+      #saveImageBtn, #newRainbowBtn { min-height: 44px; }
+    }
+
     #workCanvas {
       display: none;
     }
 
-    @media (max-width: 650px) {
-      #stage {
-        padding: 10px 10px 48px;
-      }
-
-      #circleCanvas {
-        width: min(calc(100vw - 20px), calc(100dvh - 62px));
-        height: min(calc(100vw - 20px), calc(100dvh - 62px));
-      }
-
+    @media (max-width: 650px), (max-height: 500px) {
+      #stage { padding: 10px 10px 0; }
       #minimalUi {
-        left: 12px;
-        bottom: 12px;
-        max-width: calc(100vw - 24px);
+        min-height: 52px;
+        padding: 6px 12px 12px;
       }
     }
   </style>
@@ -120,7 +129,7 @@
   </section>
 
   <div id="minimalUi">
-    <span id="status">loading rainbow detector…</span>
+    <span id="status" role="status" aria-live="polite">loading rainbow detector…</span>
     <button id="saveImageBtn" type="button">save image</button>
     <button id="newRainbowBtn" type="button">new rainbow</button>
   </div>
@@ -129,12 +138,42 @@
 
 <canvas id="workCanvas"></canvas>
 
+<script>
+// Layout and initial status do not depend on the CDN, worker or AI runtime.
+(() => {
+  const app = document.getElementById("app");
+  const stage = document.getElementById("stage");
+  const canvas = document.getElementById("circleCanvas");
+  const status = document.getElementById("status");
+  function fitViewport() {
+    const viewport = window.visualViewport;
+    const height = viewport && viewport.scale === 1
+      ? Math.min(window.innerHeight, viewport.height) : window.innerHeight;
+    app.style.setProperty("--viewport-height", height + "px");
+    fitCanvas();
+  }
+  function fitCanvas() {
+    const style = getComputedStyle(stage);
+    const width = stage.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    const height = stage.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+    canvas.style.setProperty("--canvas-size", Math.max(0, Math.floor(Math.min(width, height))) + "px");
+  }
+  window.addEventListener("resize", fitViewport);
+  window.visualViewport?.addEventListener("resize", fitViewport);
+  if (window.ResizeObserver) new ResizeObserver(fitCanvas).observe(stage);
+  fitViewport();
+  window.addEventListener("error", event => {
+    // Resource failures and worker fallback errors are handled by the artwork.
+    if (event.target === window) status.textContent = "artwork error: " + (event.message || "could not start");
+  });
+  window.addEventListener("unhandledrejection", event => {
+    status.textContent = "artwork error: " + (event.reason?.message || String(event.reason));
+  });
+})();
+</script>
+
 <script type="module">
-import {
-  pipeline,
-  RawImage,
-  env
-} from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/+esm";
+let pipeline, RawImage, env;
 
 (() => {
   "use strict";
@@ -166,12 +205,6 @@ import {
   Nothing is artificially bent into an arc.
   ============================================================
   */
-
-  /*
-  Browser caching is allowed so the model does not need to be
-  downloaded from scratch every time.
-  */
-  env.allowLocalModels = false;
 
   const API =
     "https://commons.wikimedia.org/w/api.php";
@@ -475,7 +508,11 @@ import {
       // Worker-restricted hosts/file URLs still retain a working CPU path.
       env.backends.onnx.wasm.numThreads = crossOriginIsolated
         ? Math.max(1, Math.min(4, Math.floor((navigator.hardwareConcurrency || 2) / 2))) : 1;
-      const cpu = await pipeline("zero-shot-object-detection", MODEL, { device: "wasm", dtype: "q8" });
+      const cpu = await withTimeout(
+        pipeline("zero-shot-object-detection", MODEL, { device: "wasm", dtype: "q8" }),
+        180000, "CPU detector loading timed out — reload to retry",
+        lateDetector => lateDetector.dispose()
+      );
       runtime = { device: "wasm", dtype: "q8", worker: false,
         isolated: crossOriginIsolated, wasmThreads: env.backends.onnx.wasm.numThreads };
       // Instrument the pipeline without changing its tensor/preprocessing behavior.
@@ -515,6 +552,11 @@ import {
       );
 
       const started = performance.now();
+      ({ pipeline, RawImage, env } = await withTimeout(
+        import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/+esm"),
+        45000, "detector library download timed out — check your connection and reload"
+      ));
+      env.allowLocalModels = false;
       detector = await createBrowserDetector();
       metrics.modelLoadMs = performance.now() - started;
 
@@ -531,7 +573,7 @@ import {
         "is-visible"
       );
 
-      run();
+      run().catch(err => setStatus("artwork error: " + (err.message || String(err)), false));
     }
     catch (err) {
       console.error(
@@ -540,7 +582,7 @@ import {
       );
 
       setStatus(
-        "detector failed to load",
+        "detector unavailable: " + (err.message || String(err)),
         false
       );
     }
@@ -1152,7 +1194,7 @@ import {
         err
       );
 
-      if (token === runToken && !state.complete) setStatus("model error", false);
+      if (token === runToken && !state.complete) setStatus("detector error: " + (err.message || String(err)), false);
 
       return;
     }
@@ -2186,20 +2228,35 @@ import {
         false
       );
 
-      run();
+      run().catch(err => setStatus("artwork error: " + (err.message || String(err)), false));
     }
   );
 
-  window.addEventListener(
-    "resize",
-    resizeCanvas
-  );
+  window.addEventListener("resize", resizeCanvas);
+  // The footer can wrap or grow when controls/errors appear.
+  if (window.ResizeObserver) new ResizeObserver(resizeCanvas).observe(canvas);
+  window.visualViewport?.addEventListener("resize", resizeCanvas);
 
   /*
   ============================================================
   HELPERS
   ============================================================
   */
+
+  function withTimeout(promise, ms, message, onLateResult) {
+    return new Promise((resolve, reject) => {
+      let expired = false;
+      const timer = setTimeout(() => {
+        expired = true;
+        reject(new Error(message));
+      }, ms);
+      promise.then(value => {
+        clearTimeout(timer);
+        if (expired) onLateResult?.(value);
+        else resolve(value);
+      }, error => { clearTimeout(timer); reject(error); });
+    });
+  }
 
   function loadImage(
     url

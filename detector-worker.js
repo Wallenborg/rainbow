@@ -46,6 +46,8 @@ async function handle({ id, type, options, image }) {
       detector.tokenizer = timeCallable(detector.tokenizer, "tokenizationMs", true);
       self.postMessage({ id, result: {
         ...detector.model.sessions.model.config,
+        device: options.device,
+        dtype: options.dtype,
         isolated: self.crossOriginIsolated,
         gpuInitialized: options.device === "webgpu" && Boolean(env.backends.onnx.webgpu.device),
         transformersVersion: env.version,

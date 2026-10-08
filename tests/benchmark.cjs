@@ -1,7 +1,7 @@
 const puppeteer=require(process.env.RAINBOW_PUPPETEER || 'puppeteer-core');const fs=require('fs');const http=require('http');
 (async()=>{
  const source=fs.readFileSync('index.html','utf8').replace('  loadDetector();',`window.bench={chooseBestRainbowDetection,extractDetection,acceptFragment,get state(){return state},reset(){state=freshCircleState();runToken++;},setDetector(d){detector=d}};window.ready=true;`);
- const html=source.replace('(() => {','window.tf = { pipeline, RawImage, env };\n(() => {');
+ const html=source.replace('let pipeline, RawImage, env;', 'const { pipeline, RawImage, env } = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/+esm"); env.allowLocalModels = false; window.tf = { pipeline, RawImage, env };');
  const server=http.createServer((req,res)=>{res.setHeader('Content-Type','text/html');if(req.url.includes('isolated')){res.setHeader('Cross-Origin-Opener-Policy','same-origin');res.setHeader('Cross-Origin-Embedder-Policy','require-corp');}res.end(html)});await new Promise(r=>server.listen(5196,'127.0.0.1',r));
  const browser=await puppeteer.launch({executablePath:process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true,timeout:120000,userDataDir:process.env.RAINBOW_BENCH_PROFILE || '/private/tmp/rainbow-chrome-bench',args:['--no-sandbox'],protocolTimeout:1200000});
  const samples=JSON.parse(fs.readFileSync('benchmarks/samples.json'));const results=[],logs=[],issues=[];
