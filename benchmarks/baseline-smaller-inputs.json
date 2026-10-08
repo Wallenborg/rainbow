@@ -1,0 +1,417 @@
+[
+  {
+    "index": 0,
+    "title": "File:013 Switzerland - road Hauptstrasse 7 in Wangi.jpg",
+    "edge": 900,
+    "loadMs": 132.30000007152557,
+    "decodeMs": 3,
+    "prepareMs": 467.6999999284744,
+    "pipelineMs": 3012.5,
+    "preprocessMs": 33.5,
+    "modelMs": 2968.5999999046326,
+    "detections": [
+      {
+        "score": 0.05616220086812973,
+        "label": "a rainbow in the sky",
+        "box": {
+          "xmin": -1,
+          "ymin": -4,
+          "xmax": 896,
+          "ymax": 401
+        }
+      },
+      {
+        "score": 0.052149608731269836,
+        "label": "a rainbow in the sky",
+        "box": {
+          "xmin": -1,
+          "ymin": 276,
+          "xmax": 487,
+          "ymax": 459
+        }
+      }
+    ]
+  },
+  {
+    "index": 0,
+    "title": "File:013 Switzerland - road Hauptstrasse 7 in Wangi.jpg",
+    "edge": 768,
+    "loadMs": 132.30000007152557,
+    "decodeMs": 3,
+    "prepareMs": 25,
+    "pipelineMs": 2935.399999976158,
+    "preprocessMs": 40.200000047683716,
+    "modelMs": 2885.2999999523163,
+    "detections": [
+      {
+        "score": 0.049337469041347504,
+        "label": "a rainbow in the sky",
+        "box": {
+          "xmin": -3,
+          "ymin": 7,
+          "xmax": 757,
+          "ymax": 366
+        }
+      }
+    ]
+  },
+  {
+    "index": 0,
+    "title": "File:013 Switzerland - road Hauptstrasse 7 in Wangi.jpg",
+    "edge": 640,
+    "loadMs": 132.30000007152557,
+    "decodeMs": 3,
+    "prepareMs": 25.399999976158142,
+    "pipelineMs": 2747.2000000476837,
+    "preprocessMs": 37.39999997615814,
+    "modelMs": 2708.2999999523163,
+    "detections": []
+  },
+  {
+    "index": 1,
+    "title": "File:2013-10-19 10-53-16-savoureuse-belfort.jpg",
+    "edge": 900,
+    "loadMs": 62.800000071525574,
+    "decodeMs": 2.5999999046325684,
+    "prepareMs": 19.40000009536743,
+    "pipelineMs": 2964.5999999046326,
+    "preprocessMs": 33.59999990463257,
+    "modelMs": 2928.600000023842,
+    "detections": []
+  },
+  {
+    "index": 1,
+    "title": "File:2013-10-19 10-53-16-savoureuse-belfort.jpg",
+    "edge": 768,
+    "loadMs": 62.800000071525574,
+    "decodeMs": 2.5999999046325684,
+    "prepareMs": 24.600000023841858,
+    "pipelineMs": 2691.399999976158,
+    "preprocessMs": 31.299999952316284,
+    "modelMs": 2638.4000000953674,
+    "detections": []
+  },
+  {
+    "index": 1,
+    "title": "File:2013-10-19 10-53-16-savoureuse-belfort.jpg",
+    "edge": 640,
+    "loadMs": 62.800000071525574,
+    "decodeMs": 2.5999999046325684,
+    "prepareMs": 12.799999952316284,
+    "pipelineMs": 2760,
+    "preprocessMs": 28.100000023841858,
+    "modelMs": 2731.100000023842,
+    "detections": []
+  },
+  {
+    "index": 2,
+    "title": "File:2013-10-19 11-13-12-savoureuse-belfort.jpg",
+    "edge": 900,
+    "loadMs": 41.10000002384186,
+    "decodeMs": 1.7999999523162842,
+    "prepareMs": 44.700000047683716,
+    "pipelineMs": 2688.399999976158,
+    "preprocessMs": 33.299999952316284,
+    "modelMs": 2645.7000000476837,
+    "detections": []
+  },
+  {
+    "index": 2,
+    "title": "File:2013-10-19 11-13-12-savoureuse-belfort.jpg",
+    "edge": 768,
+    "loadMs": 41.10000002384186,
+    "decodeMs": 1.7999999523162842,
+    "prepareMs": 12.300000071525574,
+    "pipelineMs": 2784.399999976158,
+    "preprocessMs": 35.5,
+    "modelMs": 2748,
+    "detections": []
+  },
+  {
+    "index": 2,
+    "title": "File:2013-10-19 11-13-12-savoureuse-belfort.jpg",
+    "edge": 640,
+    "loadMs": 41.10000002384186,
+    "decodeMs": 1.7999999523162842,
+    "prepareMs": 14.100000023841858,
+    "pipelineMs": 2826.7000000476837,
+    "preprocessMs": 37.700000047683716,
+    "modelMs": 2770.100000023842,
+    "detections": []
+  },
+  {
+    "index": 3,
+    "title": "File:2013-11-03 13-23-42 arc-en-ciel-eloie.jpg",
+    "edge": 900,
+    "loadMs": 37.800000071525574,
+    "decodeMs": 2.5999999046325684,
+    "prepareMs": 33.800000071525574,
+    "pipelineMs": 2766.899999976158,
+    "preprocessMs": 32.799999952316284,
+    "modelMs": 2732.7999999523163,
+    "detections": []
+  },
+  {
+    "index": 3,
+    "title": "File:2013-11-03 13-23-42 arc-en-ciel-eloie.jpg",
+    "edge": 768,
+    "loadMs": 37.800000071525574,
+    "decodeMs": 2.5999999046325684,
+    "prepareMs": 32.700000047683716,
+    "pipelineMs": 2639.2000000476837,
+    "preprocessMs": 32.700000047683716,
+    "modelMs": 2602,
+    "detections": []
+  },
+  {
+    "index": 3,
+    "title": "File:2013-11-03 13-23-42 arc-en-ciel-eloie.jpg",
+    "edge": 640,
+    "loadMs": 37.800000071525574,
+    "decodeMs": 2.5999999046325684,
+    "prepareMs": 7.899999976158142,
+    "pipelineMs": 2569.7000000476837,
+    "preprocessMs": 25.399999976158142,
+    "modelMs": 2540.399999976158,
+    "detections": []
+  },
+  {
+    "index": 4,
+    "title": "File:2013 Rainbow over Washfold.jpg",
+    "edge": 900,
+    "loadMs": 37.200000047683716,
+    "decodeMs": 1.399999976158142,
+    "prepareMs": 27.799999952316284,
+    "pipelineMs": 2543.3000000715256,
+    "preprocessMs": 33.10000002384186,
+    "modelMs": 2506.1999999284744,
+    "detections": []
+  },
+  {
+    "index": 4,
+    "title": "File:2013 Rainbow over Washfold.jpg",
+    "edge": 768,
+    "loadMs": 37.200000047683716,
+    "decodeMs": 1.399999976158142,
+    "prepareMs": 27.300000071525574,
+    "pipelineMs": 2537.899999976158,
+    "preprocessMs": 32.200000047683716,
+    "modelMs": 2500.600000023842,
+    "detections": []
+  },
+  {
+    "index": 4,
+    "title": "File:2013 Rainbow over Washfold.jpg",
+    "edge": 640,
+    "loadMs": 37.200000047683716,
+    "decodeMs": 1.399999976158142,
+    "prepareMs": 16.799999952316284,
+    "pipelineMs": 2497.399999976158,
+    "preprocessMs": 32.60000002384186,
+    "modelMs": 2464.2999999523163,
+    "detections": []
+  },
+  {
+    "index": 5,
+    "title": "File:2014-08-03 20-47-12 arc-en-ciel-belfort.jpg",
+    "edge": 900,
+    "loadMs": 41.299999952316284,
+    "decodeMs": 1.3000000715255737,
+    "prepareMs": 27.899999976158142,
+    "pipelineMs": 2491.5,
+    "preprocessMs": 30.399999976158142,
+    "modelMs": 2454.600000023842,
+    "detections": []
+  },
+  {
+    "index": 5,
+    "title": "File:2014-08-03 20-47-12 arc-en-ciel-belfort.jpg",
+    "edge": 768,
+    "loadMs": 41.299999952316284,
+    "decodeMs": 1.3000000715255737,
+    "prepareMs": 15.600000023841858,
+    "pipelineMs": 2521.2999999523163,
+    "preprocessMs": 28,
+    "modelMs": 2492.600000023842,
+    "detections": []
+  },
+  {
+    "index": 5,
+    "title": "File:2014-08-03 20-47-12 arc-en-ciel-belfort.jpg",
+    "edge": 640,
+    "loadMs": 41.299999952316284,
+    "decodeMs": 1.3000000715255737,
+    "prepareMs": 22.199999928474426,
+    "pipelineMs": 2613.2000000476837,
+    "preprocessMs": 28,
+    "modelMs": 2583.600000023842,
+    "detections": []
+  },
+  {
+    "index": 6,
+    "title": "File:2014-08-03 20-51-01 arc-en-ciel-belfort.jpg",
+    "edge": 900,
+    "loadMs": 191.69999992847443,
+    "decodeMs": 3.200000047683716,
+    "prepareMs": 58.199999928474426,
+    "pipelineMs": 2689.5,
+    "preprocessMs": 29.200000047683716,
+    "modelMs": 2640.399999976158,
+    "detections": [
+      {
+        "score": 0.06893344968557358,
+        "label": "a rainbow in the sky",
+        "box": {
+          "xmin": 6,
+          "ymin": 4,
+          "xmax": 619,
+          "ymax": 899
+        }
+      },
+      {
+        "score": 0.057198911905288696,
+        "label": "a rainbow in the sky",
+        "box": {
+          "xmin": 7,
+          "ymin": 17,
+          "xmax": 423,
+          "ymax": 884
+        }
+      }
+    ]
+  },
+  {
+    "index": 6,
+    "title": "File:2014-08-03 20-51-01 arc-en-ciel-belfort.jpg",
+    "edge": 768,
+    "loadMs": 191.69999992847443,
+    "decodeMs": 3.200000047683716,
+    "prepareMs": 29.5,
+    "pipelineMs": 2644.1999999284744,
+    "preprocessMs": 27.199999928474426,
+    "modelMs": 2615.8000000715256,
+    "detections": [
+      {
+        "score": 0.05363793298602104,
+        "label": "a rainbow in the sky",
+        "box": {
+          "xmin": -5,
+          "ymin": 12,
+          "xmax": 518,
+          "ymax": 775
+        }
+      },
+      {
+        "score": 0.05013918876647949,
+        "label": "a rainbow in the sky",
+        "box": {
+          "xmin": 6,
+          "ymin": 9,
+          "xmax": 367,
+          "ymax": 745
+        }
+      }
+    ]
+  },
+  {
+    "index": 6,
+    "title": "File:2014-08-03 20-51-01 arc-en-ciel-belfort.jpg",
+    "edge": 640,
+    "loadMs": 191.69999992847443,
+    "decodeMs": 3.200000047683716,
+    "prepareMs": 35.5,
+    "pipelineMs": 2656.7000000476837,
+    "preprocessMs": 31.399999976158142,
+    "modelMs": 2624.100000023842,
+    "detections": [
+      {
+        "score": 0.052854374051094055,
+        "label": "a rainbow in the sky",
+        "box": {
+          "xmin": 6,
+          "ymin": 9,
+          "xmax": 443,
+          "ymax": 646
+        }
+      }
+    ]
+  },
+  {
+    "index": 7,
+    "title": "File:2014-08-03 20-51-38 arc-en-ciel-belfort.jpg",
+    "edge": 900,
+    "loadMs": 42.60000002384186,
+    "decodeMs": 3.8000000715255737,
+    "prepareMs": 25.299999952316284,
+    "pipelineMs": 2579.600000023842,
+    "preprocessMs": 29.399999976158142,
+    "modelMs": 2544.399999976158,
+    "detections": [
+      {
+        "score": 0.08417453616857529,
+        "label": "a rainbow in the sky",
+        "box": {
+          "xmin": 8,
+          "ymin": 4,
+          "xmax": 905,
+          "ymax": 572
+        }
+      },
+      {
+        "score": 0.04597673937678337,
+        "label": "a rainbow in the sky",
+        "box": {
+          "xmin": 13,
+          "ymin": 0,
+          "xmax": 398,
+          "ymax": 532
+        }
+      }
+    ]
+  },
+  {
+    "index": 7,
+    "title": "File:2014-08-03 20-51-38 arc-en-ciel-belfort.jpg",
+    "edge": 768,
+    "loadMs": 42.60000002384186,
+    "decodeMs": 3.8000000715255737,
+    "prepareMs": 27.40000009536743,
+    "pipelineMs": 2529.5999999046326,
+    "preprocessMs": 30.5,
+    "modelMs": 2498.2000000476837,
+    "detections": [
+      {
+        "score": 0.06473323702812195,
+        "label": "a rainbow in the sky",
+        "box": {
+          "xmin": 6,
+          "ymin": 0,
+          "xmax": 353,
+          "ymax": 481
+        }
+      },
+      {
+        "score": 0.060169849544763565,
+        "label": "a rainbow in the sky",
+        "box": {
+          "xmin": 9,
+          "ymin": 1,
+          "xmax": 773,
+          "ymax": 484
+        }
+      }
+    ]
+  },
+  {
+    "index": 7,
+    "title": "File:2014-08-03 20-51-38 arc-en-ciel-belfort.jpg",
+    "edge": 640,
+    "loadMs": 42.60000002384186,
+    "decodeMs": 3.8000000715255737,
+    "prepareMs": 54.10000002384186,
+    "pipelineMs": 2638.2000000476837,
+    "preprocessMs": 27.600000023841858,
+    "modelMs": 2608.1999999284744,
+    "detections": []
+  }
+]

@@ -1,0 +1,74 @@
+[
+  {
+    "issue": {
+      "code": "SharedArrayBufferIssue",
+      "details": {
+        "sharedArrayBufferIssueDetails": {
+          "sourceCodeLocation": {
+            "scriptId": "23",
+            "url": "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/ort-wasm-simd-threaded.jsep.mjs",
+            "lineNumber": 20,
+            "columnNumber": 22
+          },
+          "isWarning": true,
+          "type": "CreationIssue"
+        }
+      }
+    }
+  },
+  {
+    "issue": {
+      "code": "DeprecationIssue",
+      "details": {
+        "deprecationIssueDetails": {
+          "affectedFrame": {
+            "frameId": "440E68BCB66BCF197C03812D5E306352"
+          },
+          "sourceCodeLocation": {
+            "scriptId": "23",
+            "url": "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/ort-wasm-simd-threaded.jsep.mjs",
+            "lineNumber": 20,
+            "columnNumber": 22
+          },
+          "type": "SharedArrayBufferConstructedWithoutIsolation"
+        }
+      }
+    }
+  },
+  {
+    "issue": {
+      "code": "SharedArrayBufferIssue",
+      "details": {
+        "sharedArrayBufferIssueDetails": {
+          "sourceCodeLocation": {
+            "scriptId": "28",
+            "url": "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/ort-wasm-simd-threaded.jsep.mjs",
+            "lineNumber": 20,
+            "columnNumber": 22
+          },
+          "isWarning": true,
+          "type": "CreationIssue"
+        }
+      }
+    }
+  },
+  {
+    "issue": {
+      "code": "DeprecationIssue",
+      "details": {
+        "deprecationIssueDetails": {
+          "affectedFrame": {
+            "frameId": "440E68BCB66BCF197C03812D5E306352"
+          },
+          "sourceCodeLocation": {
+            "scriptId": "28",
+            "url": "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/ort-wasm-simd-threaded.jsep.mjs",
+            "lineNumber": 20,
+            "columnNumber": 22
+          },
+          "type": "SharedArrayBufferConstructedWithoutIsolation"
+        }
+      }
+    }
+  }
+]

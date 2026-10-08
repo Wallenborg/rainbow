@@ -132,6 +132,7 @@
 <script type="module">
 import {
   pipeline,
+  RawImage,
   env
 } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/+esm";
 
@@ -219,7 +220,119 @@ import {
   */
   const ACCEPT_SCORE = 0.055;
 
-  const SEARCH_DELAY_MS = 900;
+  // Smaller inputs are opt-in: ?rainbowInput=768 (default: original 900px thumb).
+  // OWL-ViT resizes internally; this reduces preprocessing, not model compute.
+  const inputLimit = Number(new URLSearchParams(location.search).get("rainbowInput"));
+  const INPUT_MAX_EDGE = [640, 768].includes(inputLimit) ? inputLimit : Infinity;
+  const backendPreference = new URLSearchParams(location.search).get("rainbowBackend");
+  let runtime = null;
+  const API_INTERVAL_MS = 1000;
+  let nextApiAt = 0;
+  let apiFailures = 0;
+  let inferenceTail = Promise.resolve();
+  const prefetched = new Map();
+  const metrics = {
+    images: 0, imageErrors: 0, imageLoadMs: 0, imageWaitMs: 0,
+    inferences: 0, inferenceErrors: 0, inferenceMs: 0, preparationMs: 0,
+    modelMs: 0, preprocessMs: 0, tokenizationMs: 0, postprocessMs: 0,
+    imageDecodeMs: 0, placementMs: 0, cropMs: 0, backendFallbacks: 0,
+    lastInference: null, firstInference: null,
+    accepted: 0, acceptanceIntervals: 0, acceptanceIntervalMs: 0,
+    lastAcceptedAt: null, modelLoadMs: 0, apiRequests: 0
+  };
+  // Session totals intentionally survive "new rainbow". No polling or visible UI.
+  window.rainbowDiagnostics = () => ({
+    ...metrics,
+    runtime,
+    browser: navigator.userAgent,
+    secureContext: isSecureContext,
+    webgpuExposed: Boolean(navigator.gpu),
+    inputMaxEdge: Number.isFinite(INPUT_MAX_EDGE) ? INPUT_MAX_EDGE : "original",
+    averageImageLoadMs: metrics.imageLoadMs / (metrics.images || 1),
+    averageImageLoadExcludingDecodeMs: (metrics.imageLoadMs - metrics.imageDecodeMs) / (metrics.images || 1),
+    averageImageWaitMs: metrics.imageWaitMs / (metrics.images || 1),
+    averagePreparationMs: metrics.preparationMs / (metrics.inferences || 1),
+    // inferenceMs retains its original meaning: whole pipeline + worker round trip.
+    averageInferenceMs: metrics.inferenceMs / (metrics.inferences || 1),
+    averageModelMs: metrics.modelMs / (metrics.inferences || 1),
+    averagePreprocessMs: metrics.preprocessMs / (metrics.inferences || 1),
+    averageDecodeMs: metrics.imageDecodeMs / (metrics.images || 1),
+    averagePlacementMs: metrics.placementMs / (metrics.accepted || 1),
+    averageCropMs: metrics.cropMs / (metrics.accepted || 1),
+    acceptanceRate: metrics.accepted / (metrics.inferences || 1),
+    averageAcceptedIntervalMs: metrics.acceptanceIntervals
+      ? metrics.acceptanceIntervalMs / metrics.acceptanceIntervals : null,
+    currentFragments: state.fragments.length,
+    coveredSectors: state.coveredSectors.filter(Boolean).length,
+    complete: state.complete
+  });
+
+  function prepareImage(item) {
+    if (!prefetched.has(item.thumburl)) {
+      const started = performance.now();
+      // Resolve errors as values so speculative loading cannot reject unhandled.
+      const promise = loadImage(item.thumburl).then(img => {
+        metrics.images += 1;
+        metrics.imageLoadMs += performance.now() - started;
+        return { img };
+      }, error => {
+        metrics.imageErrors += 1;
+        return { error };
+      });
+      prefetched.set(item.thumburl, promise);
+    }
+    return prefetched.get(item.thumburl);
+  }
+
+  function prefetchNext() {
+    if (!state.complete && searchSession.queue[0]) {
+      prepareImage(searchSession.queue[0]);
+    }
+  }
+
+  async function inferSerial(input, token) {
+    const previous = inferenceTail;
+    let release;
+    inferenceTail = new Promise(resolve => { release = resolve; });
+    await previous;
+    try {
+      if (token !== runToken || state.paused) return null;
+      const started = performance.now();
+      metrics.inferences += 1;
+      try {
+        let result;
+        try {
+          result = await detector(input, LABELS, { threshold: MODEL_THRESHOLD, top_k: 8 });
+        } catch (error) {
+          if (runtime?.device !== "webgpu") throw error;
+          // Dispose before creating a fresh CPU runtime, then retry this same
+          // photograph inside the serial lock. Its pixels remain available.
+          console.warn("GPU inference failed; switching to WASM:", error);
+          detector.dispose?.();
+          if (token !== runToken || state.paused || state.complete) return null;
+          metrics.backendFallbacks += 1;
+          detector = await createBrowserDetector("wasm");
+          if (token !== runToken || state.paused) return null;
+          result = await detector(input, LABELS, { threshold: MODEL_THRESHOLD, top_k: 8 });
+        }
+        if (result.timings) {
+          metrics.lastInference = result.timings;
+          metrics.firstInference ??= result.timings;
+          for (const key of ["modelMs", "preprocessMs", "tokenizationMs", "postprocessMs"])
+            metrics[key] += result.timings[key];
+        }
+        // Stub detectors used by regression checks may return an array directly.
+        return result.detections || result;
+      } catch (error) {
+        metrics.inferenceErrors += 1;
+        throw error;
+      } finally {
+        metrics.inferenceMs += performance.now() - started;
+      }
+    } finally {
+      release();
+    }
+  }
 
   /*
   How much original photograph remains around model box.
@@ -284,7 +397,9 @@ import {
       coveredSectors: new Array(72).fill(false),
       complete: false,
       fragments: [],
-      paused: false
+      paused: false,
+      sourceTitles: new Set(),
+      sourceHashes: new Set()
     };
   }
 
@@ -294,6 +409,104 @@ import {
   ============================================================
   */
 
+  async function createBrowserDetector(forcedDevice) {
+    let device = forcedDevice || "wasm";
+    if (!forcedDevice && backendPreference !== "wasm" && navigator.gpu) {
+      try {
+        const adapter = await navigator.gpu.requestAdapter();
+        if (adapter && !adapter.info?.isFallbackAdapter) device = "webgpu";
+      } catch { /* Browsers can expose WebGPU without providing an adapter. */ }
+    }
+    const options = { model: MODEL, labels: LABELS, device,
+      dtype: device === "webgpu" ? "fp32" : "q8" };
+    let worker;
+    let disposeWorker = () => worker?.terminate();
+    try {
+      // Model computation lives in a worker; the collage stays responsive.
+      worker = new Worker(new URL("./detector-worker.js", import.meta.url), { type: "module" });
+      const pending = new Map();
+      let sequence = 0;
+      let workerError;
+      const fail = error => {
+        workerError = error;
+        for (const { reject, timer } of pending.values()) { clearTimeout(timer); reject(error); }
+        pending.clear();
+      };
+      disposeWorker = () => {
+        worker.terminate();
+        fail(new Error("Detector disposed"));
+      };
+      worker.onerror = event => fail(new Error(event.message || "Detector worker failed"));
+      worker.onmessageerror = () => fail(new Error("Detector message could not be decoded"));
+      worker.onmessage = ({ data }) => {
+        if (data.fatal) { fail(new Error(data.fatal)); return; }
+        const request = pending.get(data.id);
+        if (!request) return;
+        clearTimeout(request.timer);
+        pending.delete(data.id);
+        if (data.error) request.reject(new Error(data.error));
+        else request.resolve(data.result);
+      };
+      const request = (type, payload) => new Promise((resolve, reject) => {
+        if (workerError) { reject(workerError); return; }
+        const id = ++sequence;
+        const timer = setTimeout(() => {
+          pending.delete(id);
+          reject(new Error("Detector " + type + " timed out"));
+        }, type === "init" ? 180000 : 60000);
+        pending.set(id, { resolve, reject, timer });
+        // Preserve input pixels for a serial CPU retry if the GPU fails.
+        try { worker.postMessage({ id, type, ...payload }); }
+        catch (error) { clearTimeout(timer); pending.delete(id); reject(error); }
+      });
+      runtime = await request("init", { options });
+      const infer = input => request("infer", {
+        image: { data: input.data, width: input.width, height: input.height }
+      });
+      infer.dispose = disposeWorker;
+      return infer;
+    } catch (error) {
+      disposeWorker();
+      if (device === "webgpu") {
+        metrics.backendFallbacks += 1;
+        console.warn("GPU initialization failed; trying a fresh WASM worker:", error);
+        return createBrowserDetector("wasm");
+      }
+      // Worker-restricted hosts/file URLs still retain a working CPU path.
+      env.backends.onnx.wasm.numThreads = crossOriginIsolated
+        ? Math.max(1, Math.min(4, Math.floor((navigator.hardwareConcurrency || 2) / 2))) : 1;
+      const cpu = await pipeline("zero-shot-object-detection", MODEL, { device: "wasm", dtype: "q8" });
+      runtime = { device: "wasm", dtype: "q8", worker: false,
+        isolated: crossOriginIsolated, wasmThreads: env.backends.onnx.wasm.numThreads };
+      // Instrument the pipeline without changing its tensor/preprocessing behavior.
+      let stages;
+      for (const [key, name] of [["processor", "preprocessMs"], ["model", "modelMs"]]) {
+        const original = cpu[key];
+        cpu[key] = new Proxy(original, { apply: async (target, receiver, args) => {
+          const started = performance.now();
+          try { return await Reflect.apply(target, receiver, args); }
+          finally { stages[name] += performance.now() - started; }
+        }});
+      }
+      const originalTokenizer = cpu.tokenizer;
+      cpu.tokenizer = new Proxy(originalTokenizer, { apply(target, receiver, args) {
+        const started = performance.now();
+        try { return Reflect.apply(target, receiver, args); }
+        finally { stages.tokenizationMs += performance.now() - started; }
+      }});
+      const infer = async input => {
+        stages = { preprocessMs: 0, modelMs: 0, tokenizationMs: 0, postprocessMs: 0 };
+        const started = performance.now();
+        const detections = await cpu(input, LABELS, { threshold: MODEL_THRESHOLD, top_k: 8 });
+        const pipelineMs = performance.now() - started;
+        stages.postprocessMs = Math.max(0, pipelineMs - stages.modelMs - stages.preprocessMs - stages.tokenizationMs);
+        return { detections, timings: { ...stages, pipelineMs } };
+      };
+      infer.dispose = () => cpu.dispose();
+      return infer;
+    }
+  }
+
   async function loadDetector() {
     try {
       setStatus(
@@ -301,11 +514,9 @@ import {
         true
       );
 
-      detector =
-        await pipeline(
-          "zero-shot-object-detection",
-          MODEL
-        );
+      const started = performance.now();
+      detector = await createBrowserDetector();
+      metrics.modelLoadMs = performance.now() - started;
 
       setStatus(
         "searching for rainbows…",
@@ -366,6 +577,7 @@ import {
       canvas.width = px;
       canvas.height = px;
 
+      recomputeCoverage();
       drawAll();
     }
   }
@@ -483,15 +695,14 @@ import {
     Initial position.
     */
     let radius =
-      targetR +
-      fragment.radialOffset;
+      targetR * (1 + fragment.radialOffset);
 
     /*
     Keep a small black margin around the composition.
     */
     const margin =
       Math.max(
-        12,
+        0,
         Math.min(
           canvasW,
           canvasH
@@ -719,7 +930,7 @@ import {
         gcmtype: "file",
         gcmlimit: "50",
         prop: "imageinfo",
-        iiprop: "url|mime|size",
+        iiprop: "url|mime|size|sha1",
         iiurlwidth:
           String(
             THUMB_WIDTH
@@ -736,12 +947,20 @@ import {
     }
 
     try {
+      await sleep(Math.max(0, nextApiAt - performance.now()));
+      if (state.complete) return;
+      nextApiAt = performance.now() + API_INTERVAL_MS;
+      metrics.apiRequests += 1;
       const response =
         await fetch(
           `${API}?${params.toString()}`
         );
 
       if (!response.ok) {
+        const retryAfter = response.headers.get("Retry-After");
+        const retryMs = /^\d+$/.test(retryAfter || "")
+          ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now();
+        if (Number.isFinite(retryMs)) nextApiAt = Math.max(nextApiAt, performance.now() + retryMs);
         throw new Error(
           `HTTP ${response.status}`
         );
@@ -750,6 +969,8 @@ import {
       const data =
         await response.json();
 
+      if (data.error) throw new Error(data.error.info || data.error.code);
+      apiFailures = 0;
       const pages =
         data?.query?.pages ||
         [];
@@ -776,6 +997,8 @@ import {
               return {
                 title:
                   page.title,
+
+                sha1: info?.sha1,
 
                 thumburl:
                   info?.thumburl ||
@@ -838,6 +1061,8 @@ import {
       }
     }
     catch (err) {
+      apiFailures += 1;
+      nextApiAt = Math.max(nextApiAt, performance.now() + Math.min(60000, 2000 * 2 ** Math.min(apiFailures, 5)));
       console.warn(
         "Commons error:",
         err
@@ -869,6 +1094,8 @@ import {
     item,
     token
   ) {
+    if (token !== runToken || state.paused || state.complete ||
+        state.sourceTitles.has(item.title) || (item.sha1 && state.sourceHashes.has(item.sha1))) return;
 
     setStatus(
       "looking for a rainbow…",
@@ -876,20 +1103,15 @@ import {
     );
 
     let img;
-
-    try {
-      img =
-        await loadImage(
-          item.thumburl
-        );
-    }
-    catch {
-      setStatus(
-        "image failed",
-        false
-      );
+    const waitStarted = performance.now();
+    const loaded = await prepareImage(item);
+    prefetched.delete(item.thumburl);
+    metrics.imageWaitMs += performance.now() - waitStarted;
+    if (loaded.error) {
+      if (token === runToken) setStatus("image failed", false);
       return;
     }
+    img = loaded.img;
 
     if (
       token !== runToken ||
@@ -904,26 +1126,25 @@ import {
     let detections;
 
     try {
-      /*
-      Transformers.js zero-shot object detection.
-
-      Input is the Commons thumbnail URL.
-      Output includes:
-      label
-      score
-      box { xmin, ymin, xmax, ymax }
-      */
-      detections =
-        await detector(
-          item.thumburl,
-          LABELS,
-          {
-            threshold:
-              MODEL_THRESHOLD,
-
-            topk: 8
-          }
-        );
+      const started = performance.now();
+      const inputCanvas = document.createElement("canvas");
+      const ratio = Math.min(1, INPUT_MAX_EDGE / Math.max(img.width, img.height));
+      inputCanvas.width = Math.max(1, Math.round(img.width * ratio));
+      inputCanvas.height = Math.max(1, Math.round(img.height * ratio));
+      // One pixel read per image: retain the standard raster path used in benchmarks.
+      inputCanvas.getContext("2d").drawImage(
+        img, 0, 0, inputCanvas.width, inputCanvas.height
+      );
+      const input = RawImage.fromCanvas(inputCanvas);
+      metrics.preparationMs += performance.now() - started;
+      detections = await inferSerial(input, token);
+      // Detector boxes refer to input pixels; crops always use the original photo.
+      detections = detections?.map(d => ({ ...d, box: {
+        xmin: d.box.xmin * img.width / input.width,
+        xmax: d.box.xmax * img.width / input.width,
+        ymin: d.box.ymin * img.height / input.height,
+        ymax: d.box.ymax * img.height / input.height
+      }}));
     }
     catch (err) {
       console.warn(
@@ -931,10 +1152,7 @@ import {
         err
       );
 
-      setStatus(
-        "model error",
-        false
-      );
+      if (token === runToken && !state.complete) setStatus("model error", false);
 
       return;
     }
@@ -974,6 +1192,7 @@ import {
       return;
     }
 
+    const cropStarted = performance.now();
     const crop =
       extractDetection(
         img,
@@ -989,16 +1208,14 @@ import {
       return;
     }
 
+    metrics.cropMs += performance.now() - cropStarted;
     acceptFragment(
       crop,
       best,
       item
     );
 
-    setStatus(
-      "trying to complete the circle…",
-      false
-    );
+    if (!state.complete) setStatus("trying to complete the circle…", false);
   }
 
   function chooseBestRainbowDetection(
@@ -1024,6 +1241,8 @@ import {
               d.score
             )
         )
+        .filter(d => [d.box.xmin, d.box.ymin, d.box.xmax, d.box.ymax].every(Number.isFinite)
+          && d.box.xmax > d.box.xmin && d.box.ymax > d.box.ymin)
         .filter(
           d =>
             /rainbow/i
@@ -1340,6 +1559,10 @@ import {
     detection,
     item
   ) {
+    if (state.sourceTitles.has(item.title) || (item.sha1 && state.sourceHashes.has(item.sha1))) return;
+    const placementStarted = performance.now();
+    state.sourceTitles.add(item.title);
+    if (item.sha1) state.sourceHashes.add(item.sha1);
     const angle =
       choosePlacementAngle();
 
@@ -1375,8 +1598,8 @@ import {
 
       radialOffset:
         randomRange(
-          -82,
-          82
+          -0.16,
+          0.16
         ),
 
       rotationError:
@@ -1407,17 +1630,22 @@ import {
             )
     });
 
+    const fragment = state.fragments[state.fragments.length - 1];
+    // Evaluate positions, retaining all the random scale/flip/rotation properties.
+    if (Math.random() >= 0.15) {
+      let bestAngle = fragment.angle;
+      let bestGain = -1;
+      const gap = centreOfLargestGap(state.coveredSectors);
+      for (let step = 0; step < 72; step += 1) {
+        const sector = (gap + step) % 72;
+        if (state.coveredSectors[sector]) continue;
+        fragment.angle = (sector + 0.5) / 72 * Math.PI * 2 + degToRad(randomRange(-3, 3));
+        const gain = fragmentCoverage(fragment).filter(i => !state.coveredSectors[i]).length;
+        if (gain > bestGain) { bestGain = gain; bestAngle = fragment.angle; }
+      }
+      fragment.angle = bestAngle;
+    }
     state.accepted += 1;
-
-    /*
-    Real completion logic:
-    mark the actual sectors this newly placed fragment covers.
-    */
-    markFragmentCoverage(
-      state.fragments[
-        state.fragments.length - 1
-      ]
-    );
 
     /*
     Keep autonomous replacement alive.
@@ -1426,14 +1654,17 @@ import {
       state.fragments.length >
       46
     ) {
-      const index =
-        Math.floor(
-          Math.random() *
-          Math.min(
-            12,
-            state.fragments.length
-          )
-        );
+      // Remove the least useful early fragment, preserving uniquely covered gaps.
+      const counts = new Array(72).fill(0);
+      for (const fragment of state.fragments) {
+        for (const sector of fragmentCoverage(fragment)) counts[sector] += 1;
+      }
+      let index = 0;
+      let least = Infinity;
+      for (let i = 0; i < 12; i += 1) {
+        const unique = fragmentCoverage(state.fragments[i]).filter(j => counts[j] === 1).length;
+        if (unique < least) { least = unique; index = i; }
+      }
 
       state.fragments.splice(
         index,
@@ -1441,10 +1672,19 @@ import {
       );
     }
 
+    recomputeCoverage();
+    metrics.accepted += 1;
+    const now = performance.now();
+    if (metrics.lastAcceptedAt !== null) {
+      metrics.acceptanceIntervals += 1;
+      metrics.acceptanceIntervalMs += now - metrics.lastAcceptedAt;
+    }
+    metrics.lastAcceptedAt = now;
     drawAll();
     updateHud();
 
     checkCompletion();
+    metrics.placementMs += performance.now() - placementStarted;
   }
 
   function choosePlacementAngle() {
@@ -1571,110 +1811,38 @@ import {
     );
   }
 
-  function markFragmentCoverage(
-    fragment
-  ) {
-    const sectors =
-      state.coveredSectors.length;
-
-    /*
-    Approximate the angular width of the placed photographic
-    fragment at the target ring.
-
-    This is based on its actual displayed width rather than a
-    fake percentage counter.
-    */
-    const w =
-      canvas.width;
-
-    const targetR =
-      w * 0.27;
-
-    const aspect =
-      fragment.canvas.width /
-      Math.max(
-        fragment.canvas.height,
-        1
-      );
-
-    const drawH =
-      targetR *
-      fragment.scale;
-
-    const drawW =
-      drawH *
-      aspect *
-      fragment.widthScale;
-
-    /*
-    Arc angle subtended by the fragment.
-
-    Cap it so one enormous photograph cannot falsely complete
-    half the circle by itself.
-    */
-    const angularWidth =
-      clamp(
-        2 *
-        Math.atan2(
-          drawW / 2,
-          targetR
-        ),
-        degToRad(5),
-        degToRad(42)
-      );
-
-    const sectorSize =
-      Math.PI *
-      2 /
-      sectors;
-
-    const halfCount =
-      Math.max(
-        0,
-        Math.floor(
-          angularWidth /
-          sectorSize /
-          2
-        )
-      );
-
-    let centre =
-      Math.floor(
-        normalizeAngle(
-          fragment.angle
-        ) /
-        (
-          Math.PI *
-          2
-        ) *
-        sectors
-      );
-
-    centre =
-      clamp(
-        centre,
-        0,
-        sectors - 1
-      );
-
-    for (
-      let offset =
-        -halfCount;
-      offset <=
-        halfCount;
-      offset += 1
-    ) {
-      const index =
-        (
-          centre +
-          offset +
-          sectors
-        ) %
-        sectors;
-
-      state.coveredSectors[index] =
-        true;
+  // Coverage is the transformed photographic rectangle intersecting the ring.
+  // This is a composition proxy, not a claim that every pixel contains rainbow.
+  function fragmentCoverage(fragment) {
+    const size = canvas.width;
+    const radius = size * 0.27;
+    const placement = getSafeFragmentPosition(fragment, size / 2, size / 2, radius, size, size);
+    const rotation = fragment.angle + Math.PI / 2 + fragment.rotationError;
+    const cos = Math.cos(rotation), sin = Math.sin(rotation);
+    const result = [];
+    for (let i = 0; i < 72; i += 1) {
+      // Sample both ends and the centre to avoid counting a tiny corner as covered.
+      const covered = [0.1, 0.5, 0.9].every(offset => {
+        const angle = (i + offset) / 72 * Math.PI * 2;
+        const delta = Math.abs(normalizeAngle(angle - fragment.angle + Math.PI) - Math.PI);
+        if (delta > degToRad(21)) return false;
+        const dx = size / 2 + Math.cos(angle) * radius - placement.x;
+        const dy = size / 2 + Math.sin(angle) * radius - placement.y;
+        return Math.abs(dx * cos + dy * sin) <= placement.drawW / 2 &&
+          Math.abs(-dx * sin + dy * cos) <= placement.drawH / 2;
+      });
+      if (covered) result.push(i);
     }
+    return result;
+  }
+
+  function markFragmentCoverage(fragment) {
+    for (const i of fragmentCoverage(fragment)) state.coveredSectors[i] = true;
+  }
+
+  function recomputeCoverage() {
+    state.coveredSectors.fill(false);
+    for (const fragment of state.fragments) markFragmentCoverage(fragment);
   }
 
   function normalizeAngle(
@@ -1764,8 +1932,8 @@ import {
       }
 
       if (
-        searchSession.queue.length <
-        5
+        searchSession.queue.length ===
+        0
       ) {
         await refillQueue();
       }
@@ -1780,18 +1948,19 @@ import {
         searchSession.queue.shift();
 
       if (!item) {
+        if (allCategoriesExhausted()) return;
         await sleep(800);
         continue;
       }
 
+      prefetchNext();
       await inspectItem(
         item,
         token
       );
 
-      await sleep(
-        SEARCH_DELAY_MS
-      );
+      // Yield for painting/input without adding a fixed pause to every search.
+      await sleep(0);
     }
   }
 
@@ -1841,19 +2010,6 @@ import {
 
     targetCtx.restore();
 
-    /*
-    Screen offsets must scale proportionally into export space.
-    */
-    const screenBase =
-      Math.max(
-        canvas.width,
-        1
-      );
-
-    const offsetScale =
-      size /
-      screenBase;
-
     for (
       const fragment
       of state.fragments
@@ -1864,89 +2020,10 @@ import {
       const angle =
         fragment.angle;
 
-      const aspect =
-        img.width /
-        Math.max(
-          img.height,
-          1
-        );
-
-      const drawH =
-        targetR *
-        fragment.scale;
-
-      const drawW =
-        drawH *
-        aspect *
-        fragment.widthScale;
-
-      const rotation =
-        angle +
-        Math.PI / 2 +
-        fragment.rotationError;
-
-      const cos =
-        Math.abs(
-          Math.cos(
-            rotation
-          )
-        );
-
-      const sin =
-        Math.abs(
-          Math.sin(
-            rotation
-          )
-        );
-
-      const boundW =
-        drawW * cos +
-        drawH * sin;
-
-      const boundH =
-        drawW * sin +
-        drawH * cos;
-
-      let radius =
-        targetR +
-        fragment.radialOffset *
-        offsetScale;
-
-      const margin =
-        size * 0.025;
-
-      let x = cx;
-      let y = cy;
-
-      for (
-        let attempt = 0;
-        attempt < 24;
-        attempt += 1
-      ) {
-        x =
-          cx +
-          Math.cos(angle) *
-          radius;
-
-        y =
-          cy +
-          Math.sin(angle) *
-          radius;
-
-        const fits =
-          x - boundW / 2 >= margin &&
-          x + boundW / 2 <=
-            size - margin &&
-          y - boundH / 2 >= margin &&
-          y + boundH / 2 <=
-            size - margin;
-
-        if (fits) {
-          break;
-        }
-
-        radius *= 0.94;
-      }
+      const { x, y, drawW, drawH } = getSafeFragmentPosition(
+        fragment, cx, cy, targetR, size, size
+      );
+      const rotation = angle + Math.PI / 2 + fragment.rotationError;
 
       targetCtx.save();
 
@@ -2087,8 +2164,9 @@ import {
   newRainbowBtn.addEventListener(
     "click",
     () => {
+      if (!state.complete) return;
       runToken += 1;
-
+      metrics.lastAcceptedAt = null;
       state =
         freshCircleState();
 
@@ -2140,12 +2218,22 @@ import {
         img.decoding =
           "async";
 
-        img.onload =
-          () =>
+        const timeout = setTimeout(() => {
+          img.onload = img.onerror = null;
+          img.src = "";
+          reject(new Error("Image load timed out"));
+        }, 20000);
+        img.onload = async () => {
+          try {
+            const decodeStarted = performance.now();
+            await img.decode();
+            metrics.imageDecodeMs += performance.now() - decodeStarted;
+            clearTimeout(timeout);
             resolve(img);
+          } catch (error) { clearTimeout(timeout); reject(error); }
+        };
 
-        img.onerror =
-          reject;
+        img.onerror = error => { clearTimeout(timeout); reject(error); };
 
         img.src =
           url;

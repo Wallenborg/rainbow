@@ -1,0 +1,38 @@
+const puppeteer=require(process.env.RAINBOW_PUPPETEER || 'puppeteer-core');const fs=require('fs');const http=require('http');
+(async()=>{
+ const source=fs.readFileSync('index.html','utf8').replace('  loadDetector();',`window.bench={chooseBestRainbowDetection,extractDetection,acceptFragment,get state(){return state},reset(){state=freshCircleState();runToken++;},setDetector(d){detector=d}};window.ready=true;`);
+ const html=source.replace('(() => {','window.tf = { pipeline, RawImage, env };\n(() => {');
+ const server=http.createServer((req,res)=>{res.setHeader('Content-Type','text/html');if(req.url.includes('isolated')){res.setHeader('Cross-Origin-Opener-Policy','same-origin');res.setHeader('Cross-Origin-Embedder-Policy','require-corp');}res.end(html)});await new Promise(r=>server.listen(5196,'127.0.0.1',r));
+ const browser=await puppeteer.launch({executablePath:process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true,timeout:120000,userDataDir:process.env.RAINBOW_BENCH_PROFILE || '/private/tmp/rainbow-chrome-bench',args:['--no-sandbox'],protocolTimeout:1200000});
+ const samples=JSON.parse(fs.readFileSync('benchmarks/samples.json'));const results=[],logs=[],issues=[];
+ const page=await browser.newPage();await page.setViewport({width:1200,height:1000});page.on('console',m=>{logs.push({type:m.type(),text:m.text()});if(/warn|error/.test(m.type()))console.log('BROWSER',m.text().slice(0,400));});page.on('pageerror',e=>console.log('PAGEERROR',e.message));const cdp=await page.createCDPSession();await cdp.send('Audits.enable');cdp.on('Audits.issueAdded',e=>{issues.push(e);console.log('ISSUE',JSON.stringify(e))});
+ try {
+ for(const variant of [{name:'wasm-q8-original',device:'wasm',dtype:'q8',edges:[null]},{name:'webgpu-fp32',device:'webgpu',dtype:'fp32',edges:[null,768,640]},{name:'webgpu-q4',device:'webgpu',dtype:'q4',edges:[null]},{name:'isolated-wasm-q8-4threads',device:'wasm',dtype:'q8',threads:4,isolated:true,edges:[null]}]){
+ await page.goto('http://127.0.0.1:5196/'+(variant.isolated?'isolated':''),{waitUntil:'domcontentloaded'});await page.waitForFunction('window.ready',{timeout:120000});
+ const result=await page.evaluate(async(variant,samples)=>{
+ const adapter=await navigator.gpu?.requestAdapter();const capabilities={isolated:crossOriginIsolated,sharedArrayBuffer:typeof SharedArrayBuffer,gpu:!!adapter,adapter:adapter?{vendor:adapter.info.vendor,architecture:adapter.info.architecture,device:adapter.info.device,description:adapter.info.description,isFallbackAdapter:adapter.info.isFallbackAdapter,features:[...adapter.features]}:null};
+ if(variant.threads)tf.env.backends.onnx.wasm.numThreads=variant.threads;
+ const modelAt=performance.now();let detector;try{detector=await tf.pipeline('zero-shot-object-detection','Xenova/owlvit-base-patch32',{device:variant.device,dtype:variant.dtype})}catch(e){return {variant,capabilities,error:String(e)}}
+ const loadMs=performance.now()-modelAt;bench.setDetector(detector);const session=detector.model.sessions.model.config;
+ console.log('LOADED',JSON.stringify({variant,loadMs,session,capabilities}));
+ const stages={};for(const key of ['model','processor']){const original=detector[key];detector[key]=new Proxy(original,{apply:async(target,thisArg,args)=>{const start=performance.now();try{return await Reflect.apply(target,thisArg,args)}finally{stages[key]=(stages[key]||0)+performance.now()-start}}})}
+ const labels=['rainbow','a rainbow in the sky','double rainbow','rainbow arc'];const rows=[];
+ const images=[];for(const sample of samples){const start=performance.now();const img=await new Promise((resolve,reject)=>{const i=new Image();i.crossOrigin='anonymous';const timer=setTimeout(()=>reject(Error('timeout: '+sample.title)),30000);i.onload=()=>{clearTimeout(timer);resolve(i)};i.onerror=e=>{clearTimeout(timer);reject(Error('load: '+sample.title))};i.src=sample.url});const loadMs=performance.now()-start;const decAt=performance.now();await img.decode();images.push({sample,img,loadMs,decodeMs:performance.now()-decAt})}
+ // Separate warmup: model allocations/shader compilation are not steady state.
+ const warm=document.createElement('canvas');warm.width=images[0].img.width;warm.height=images[0].img.height;warm.getContext('2d').drawImage(images[0].img,0,0);const warmAt=performance.now();try{await detector(tf.RawImage.fromCanvas(warm),labels,{threshold:.045,top_k:8})}catch(e){await detector.dispose();return {variant,capabilities,loadMs,session,error:String(e)}}const warmupMs=performance.now()-warmAt;
+ for(const edge of variant.edges){bench.reset();for(const [index,{sample,img,loadMs,decodeMs}] of images.entries()){
+ stages.model=stages.processor=0;const prepAt=performance.now();const canvas=document.createElement('canvas');const ratio=edge?Math.min(1,edge/Math.max(img.width,img.height)):1;canvas.width=Math.round(img.width*ratio);canvas.height=Math.round(img.height*ratio);canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);const raw=tf.RawImage.fromCanvas(canvas);const prepareMs=performance.now()-prepAt;
+ const at=performance.now();const detections=await detector(raw,labels,{threshold:.045,top_k:8});const pipelineMs=performance.now()-at;
+ const mapped=detections.map(d=>({...d,box:{xmin:d.box.xmin*img.width/raw.width,xmax:d.box.xmax*img.width/raw.width,ymin:d.box.ymin*img.height/raw.height,ymax:d.box.ymax*img.height/raw.height}}));
+ const postAt=performance.now();const best=bench.chooseBestRainbowDetection(mapped,img);const accepted=!!best&&best.score>=.055;const filterMs=performance.now()-postAt;const placeAt=performance.now();let crop;if(accepted){crop=bench.extractDetection(img,best.box);if(crop)bench.acceptFragment(crop,best,sample)}const placementMs=performance.now()-placeAt;
+ const row={index,title:sample.title,edge:edge||'original',width:img.width,height:img.height,inputWidth:raw.width,inputHeight:raw.height,loadMs,decodeMs,prepareMs,pipelineMs,preprocessMs:stages.processor,modelMs:stages.model,filterMs,placementMs,accepted:accepted&&!!crop,best,detections:mapped};rows.push(row);console.log('RESULT',JSON.stringify({variant:variant.name,...row}));
+ }}
+ // Contact sheet: original photos plus selected detected box per variant.
+ document.querySelector('#app').style.display='none';const sheet=document.createElement('canvas');sheet.id='benchmark-sheet';sheet.width=1200;sheet.height=960;const ctx=sheet.getContext('2d');ctx.fillStyle='#020202';ctx.fillRect(0,0,sheet.width,sheet.height);ctx.font='12px monospace';
+ for(const [i,{img,sample}]of images.entries()){const x=i%4*300,y=Math.floor(i/4)*480;const r=rows.find(r=>r.index===i&&r.edge==='original');ctx.drawImage(img,x,y,300,300*img.height/img.width);if(r?.best){const box=r.best.box;ctx.strokeStyle=r.accepted?'#00ff00':'#ff8800';ctx.strokeRect(x+box.xmin/img.width*300,y+box.ymin/img.width*300,(box.xmax-box.xmin)/img.width*300,(box.ymax-box.ymin)/img.width*300)}ctx.fillStyle='white';ctx.fillText(i+' '+(r?.best?.score.toFixed(3)||'no detection')+' '+(r?.accepted?'accepted':'rejected'),x+5,y+460)}document.body.appendChild(sheet);
+ await detector.dispose();return {variant,capabilities,loadMs,warmupMs,session,wasmThreads:tf.env.backends.onnx.wasm.numThreads,rows};
+ },variant,samples);
+ results.push(result);fs.writeFileSync('benchmarks/results-local.json',JSON.stringify(results,null,2));console.log('VARIANT DONE',variant.name,result.error||result.rows.length);if(!result.error)await page.screenshot({path:'/private/tmp/rainbow-'+variant.name+'.png',fullPage:true});
+ }
+ }finally{fs.writeFileSync('benchmarks/browser-logs-local.json',JSON.stringify({logs,issues},null,2));await browser.close();server.close();}
+})().catch(e=>{console.error(e);process.exit(1)});

@@ -1,0 +1,275 @@
+{
+  "result": [
+    {
+      "mode": "auto",
+      "loadMs": 2509.6999999284744,
+      "warmMs": 390.3000000715256,
+      "runtime": {
+        "dtype": "fp32",
+        "device": "webgpu",
+        "isolated": false,
+        "wasmThreads": 1,
+        "loadMs": 2442.600000023842,
+        "worker": true
+      },
+      "rows": [
+        {
+          "title": "File:013 Switzerland - road Hauptstrasse 7 in Wangi.jpg",
+          "elapsedMs": 907.7999999523163,
+          "accepted": true,
+          "preparationMs": 12.600000023841858,
+          "placementMs": 7.899999976158142,
+          "cropMs": 674.9000000953674,
+          "timings": {
+            "preprocessMs": 35.200000047683716,
+            "modelMs": 168.10000002384186,
+            "tokenizationMs": 3.5999999046325684,
+            "pipelineMs": 208.39999997615814,
+            "postprocessMs": 1.5
+          }
+        },
+        {
+          "title": "File:2013-10-19 10-53-16-savoureuse-belfort.jpg",
+          "elapsedMs": 354.5,
+          "accepted": false,
+          "preparationMs": 54.300000071525574,
+          "placementMs": 0,
+          "cropMs": 0,
+          "timings": {
+            "preprocessMs": 48.09999990463257,
+            "modelMs": 176.5,
+            "tokenizationMs": 4.800000071525574,
+            "pipelineMs": 230.80000007152557,
+            "postprocessMs": 1.4000000953674316
+          }
+        },
+        {
+          "title": "File:2013-10-19 11-13-12-savoureuse-belfort.jpg",
+          "elapsedMs": 216,
+          "accepted": false,
+          "preparationMs": 5.5,
+          "placementMs": 0,
+          "cropMs": 0,
+          "timings": {
+            "preprocessMs": 30.5,
+            "modelMs": 170.20000004768372,
+            "tokenizationMs": 0.10000002384185791,
+            "pipelineMs": 201.30000007152557,
+            "postprocessMs": 0.5
+          }
+        },
+        {
+          "title": "File:2013-11-03 13-23-42 arc-en-ciel-eloie.jpg",
+          "elapsedMs": 219.29999995231628,
+          "accepted": true,
+          "preparationMs": 4.600000023841858,
+          "placementMs": 0.6999999284744263,
+          "cropMs": 4.300000071525574,
+          "timings": {
+            "preprocessMs": 28.800000071525574,
+            "modelMs": 172.5,
+            "tokenizationMs": 0.19999992847442627,
+            "pipelineMs": 202.10000002384186,
+            "postprocessMs": 0.6000000238418579
+          }
+        },
+        {
+          "title": "File:2013 Rainbow over Washfold.jpg",
+          "elapsedMs": 206.40000009536743,
+          "accepted": false,
+          "preparationMs": 2.799999952316284,
+          "placementMs": 0,
+          "cropMs": 0,
+          "timings": {
+            "preprocessMs": 27.600000023841858,
+            "modelMs": 169.89999997615814,
+            "tokenizationMs": 0.09999990463256836,
+            "pipelineMs": 198.19999992847443,
+            "postprocessMs": 0.6000000238418579
+          }
+        },
+        {
+          "title": "File:2014-08-03 20-47-12 arc-en-ciel-belfort.jpg",
+          "elapsedMs": 259.5,
+          "accepted": false,
+          "preparationMs": 4.200000047683716,
+          "placementMs": 0,
+          "cropMs": 0,
+          "timings": {
+            "preprocessMs": 38.700000047683716,
+            "modelMs": 210.79999995231628,
+            "tokenizationMs": 0.19999992847442627,
+            "pipelineMs": 250.19999992847443,
+            "postprocessMs": 0.5
+          }
+        },
+        {
+          "title": "File:2014-08-03 20-51-01 arc-en-ciel-belfort.jpg",
+          "elapsedMs": 245.59999990463257,
+          "accepted": true,
+          "preparationMs": 8.800000071525574,
+          "placementMs": 3.299999952316284,
+          "cropMs": 5.399999976158142,
+          "timings": {
+            "preprocessMs": 46.200000047683716,
+            "modelMs": 169.09999990463257,
+            "tokenizationMs": 0.20000004768371582,
+            "pipelineMs": 215.90000009536743,
+            "postprocessMs": 0.40000009536743164
+          }
+        },
+        {
+          "title": "File:2014-08-03 20-51-38 arc-en-ciel-belfort.jpg",
+          "elapsedMs": 213.40000009536743,
+          "accepted": true,
+          "preparationMs": 3.600000023841858,
+          "placementMs": 0.30000007152557373,
+          "cropMs": 2.299999952316284,
+          "timings": {
+            "preprocessMs": 27.199999928474426,
+            "modelMs": 174.20000004768372,
+            "tokenizationMs": 0.10000002384185791,
+            "pipelineMs": 201.89999997615814,
+            "postprocessMs": 0.3999999761581421
+          }
+        }
+      ]
+    },
+    {
+      "mode": "wasm",
+      "loadMs": 957.2999999523163,
+      "warmMs": 2611.7000000476837,
+      "runtime": {
+        "dtype": "q8",
+        "device": "wasm",
+        "isolated": false,
+        "wasmThreads": 1,
+        "loadMs": 776.8000000715256,
+        "worker": true
+      },
+      "rows": [
+        {
+          "title": "File:013 Switzerland - road Hauptstrasse 7 in Wangi.jpg",
+          "elapsedMs": 2521.399999976158,
+          "accepted": true,
+          "preparationMs": 4.599999904632568,
+          "placementMs": 0.10000002384185791,
+          "cropMs": 1.5,
+          "timings": {
+            "preprocessMs": 25.5,
+            "modelMs": 2482.7000000476837,
+            "tokenizationMs": 0.20000004768371582,
+            "pipelineMs": 2514.5,
+            "postprocessMs": 6.099999904632568
+          }
+        },
+        {
+          "title": "File:2013-10-19 10-53-16-savoureuse-belfort.jpg",
+          "elapsedMs": 2528.600000023842,
+          "accepted": false,
+          "preparationMs": 6.899999976158142,
+          "placementMs": 0,
+          "cropMs": 0,
+          "timings": {
+            "preprocessMs": 33,
+            "modelMs": 2478.7000000476837,
+            "tokenizationMs": 0.2999999523162842,
+            "pipelineMs": 2512.7000000476837,
+            "postprocessMs": 0.7000000476837158
+          }
+        },
+        {
+          "title": "File:2013-10-19 11-13-12-savoureuse-belfort.jpg",
+          "elapsedMs": 2519.6999999284744,
+          "accepted": false,
+          "preparationMs": 4.600000023841858,
+          "placementMs": 0,
+          "cropMs": 0,
+          "timings": {
+            "preprocessMs": 24.899999976158142,
+            "modelMs": 2485.1999999284744,
+            "tokenizationMs": 0.20000004768371582,
+            "pipelineMs": 2510.899999976158,
+            "postprocessMs": 0.6000000238418579
+          }
+        },
+        {
+          "title": "File:2013-11-03 13-23-42 arc-en-ciel-eloie.jpg",
+          "elapsedMs": 2513.8000000715256,
+          "accepted": false,
+          "preparationMs": 3.200000047683716,
+          "placementMs": 0,
+          "cropMs": 0,
+          "timings": {
+            "preprocessMs": 24.300000071525574,
+            "modelMs": 2479.100000023842,
+            "tokenizationMs": 0.09999990463256836,
+            "pipelineMs": 2504,
+            "postprocessMs": 0.5
+          }
+        },
+        {
+          "title": "File:2013 Rainbow over Washfold.jpg",
+          "elapsedMs": 2513.1999999284744,
+          "accepted": false,
+          "preparationMs": 3.399999976158142,
+          "placementMs": 0,
+          "cropMs": 0,
+          "timings": {
+            "preprocessMs": 26.800000071525574,
+            "modelMs": 2476.100000023842,
+            "tokenizationMs": 0,
+            "pipelineMs": 2505,
+            "postprocessMs": 2.0999999046325684
+          }
+        },
+        {
+          "title": "File:2014-08-03 20-47-12 arc-en-ciel-belfort.jpg",
+          "elapsedMs": 2479.899999976158,
+          "accepted": false,
+          "preparationMs": 3.200000047683716,
+          "placementMs": 0,
+          "cropMs": 0,
+          "timings": {
+            "preprocessMs": 26.90000009536743,
+            "modelMs": 2446.1999999284744,
+            "tokenizationMs": 0.09999990463256836,
+            "pipelineMs": 2473.5,
+            "postprocessMs": 0.30000007152557373
+          }
+        },
+        {
+          "title": "File:2014-08-03 20-51-01 arc-en-ciel-belfort.jpg",
+          "elapsedMs": 2497.5,
+          "accepted": true,
+          "preparationMs": 7.5,
+          "placementMs": 0.3999999761581421,
+          "cropMs": 4.199999928474426,
+          "timings": {
+            "preprocessMs": 29.399999976158142,
+            "modelMs": 2447.7999999523163,
+            "tokenizationMs": 0.10000002384185791,
+            "pipelineMs": 2479.600000023842,
+            "postprocessMs": 2.3000000715255737
+          }
+        },
+        {
+          "title": "File:2014-08-03 20-51-38 arc-en-ciel-belfort.jpg",
+          "elapsedMs": 2523,
+          "accepted": false,
+          "preparationMs": 3.5,
+          "placementMs": 0,
+          "cropMs": 0,
+          "timings": {
+            "preprocessMs": 25,
+            "modelMs": 2490.3000000715256,
+            "tokenizationMs": 0.10000002384185791,
+            "pipelineMs": 2516.2000000476837,
+            "postprocessMs": 0.7999999523162842
+          }
+        }
+      ]
+    }
+  ],
+  "errors": []
+}
